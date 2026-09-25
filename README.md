@@ -138,21 +138,84 @@ Accessible from the top navigation bar:
 
 ---
 
-## Hardware Wiring
+## Hardware and Power Architecture
 
-Connect the TF02-Pro cable to your USB-to-UART adapter or development board:
+The vehicle deployment uses a dedicated battery pack, an adjustable DC-DC buck converter, a Benewake TF02-Pro LiDAR, and a USB-to-UART serial adapter.
 
-| TF02-Pro Wire | Function | Adapter / Board Pin |
-|---|---|---|
-| Red | VCC (5V Power) | 5V |
-| Black | GND (Ground) | GND |
-| Green | TXD (Sensor Transmit) | RXD (Adapter Receive) |
-| White | RXD (Sensor Receive) | TXD (Adapter Transmit) |
+### Circuit and Signal Wiring Diagram
 
-Note on Linux: Ensure your user belongs to the serial group:
-```bash
-sudo usermod -aG dialout $USER
+```mermaid
+flowchart TD
+    subgraph Power ["Power Subsystem"]
+        BAT["Battery Pack (7.4V - 14.8V DC)"] -->|"+ Battery Voltage"| BUCK_IN_POS["Buck Converter IN (+)"]
+        BAT -->|"- Battery Ground"| BUCK_IN_NEG["Buck Converter IN (-)"]
+        BUCK_IN_POS --> BUCK_REG["Step-Down Regulator (Adjusted to 5.0V DC)"]
+        BUCK_REG --> BUCK_OUT_POS["Buck Converter OUT (+5.0V)"]
+        BUCK_IN_NEG --> BUCK_OUT_NEG["Buck Converter OUT (GND)"]
+    end
+
+    subgraph Sensor ["Sensor Subsystem"]
+        LIDAR["TF02-Pro LiDAR"]
+        BUCK_OUT_POS -->|"Red Wire: VCC (5.0V DC)"| LIDAR
+        BUCK_OUT_NEG -->|"Black Wire: GND"| LIDAR
+    end
+
+    subgraph Serial ["Serial Data Interface"]
+        ADAPTER["USB-to-UART Adapter (/dev/ttyUSB0)"]
+        BUCK_OUT_NEG -->|"Common Ground Reference"| ADAPTER
+        LIDAR -->|"Green Wire: TXD (Sensor Transmit)"| ADAPTER
+        ADAPTER -->|"White Wire: RXD (Sensor Receive)"| LIDAR
+    end
+
+    subgraph Host ["Host Computer"]
+        PC["Raspberry Pi / Linux / PC"]
+        ADAPTER -->|"USB Port (Enumerates as /dev/ttyUSB0)"| PC
+    end
 ```
+
+### Wiring Reference Table
+
+| Component | Wire / Pin | Connected To | Purpose |
+|---|---|---|---|
+| Battery Pack (+) | Positive Terminal | Buck Converter IN (+) | Input power (7.4V to 14.8V) |
+| Battery Pack (-) | Negative Terminal | Buck Converter IN (-) | Common system ground return |
+| Buck Converter OUT (+) | 5.0V Regulated | TF02-Pro Red Wire (VCC) | Regulated 5V sensor power |
+| Buck Converter OUT (-) | Common Ground | TF02-Pro Black Wire (GND) | Sensor power return |
+| Buck Converter OUT (-) | Common Ground | USB-to-UART Adapter GND | Shared ground signal reference |
+| TF02-Pro Green Wire | Sensor TXD | USB-to-UART Adapter RXD | Sensor data stream to host |
+| TF02-Pro White Wire | Sensor RXD | USB-to-UART Adapter TXD | Configuration commands from host |
+| USB-to-UART Adapter | USB Connector | Host USB Port | Host communication (/dev/ttyUSB0) |
+
+### Important Power and Grounding Notes
+
+1. Buck Converter Output Voltage Check:
+   - Before connecting the TF02-Pro, power on the battery and buck converter.
+   - Measure the output with a digital multimeter.
+   - Adjust the trimpot until the output reads exactly 5.0V DC (+/-0.1V).
+   - Sensor input voltage range is 5.0V to 5.5V. Exceeding 5.5V can damage sensor electronics.
+
+2. Current Capacity:
+   - Ensure the buck converter is rated for at least 1A to 2A continuous output.
+   - While the TF02-Pro draws roughly 200mA during standard scanning, pulse bursts can peak near 1A.
+
+3. Common Ground Requirement:
+   - The negative ground of the battery and buck converter MUST be connected to the GND pin of the USB-to-UART adapter.
+   - Without a shared ground reference, UART voltage levels float, causing missed headers (0x59 0x59), frame dropouts, or communication failure.
+
+4. Isolating USB 5V Pin:
+   - Do NOT connect the USB-to-UART adapter 5V pin to the sensor when the sensor is powered by the buck converter.
+   - Leave the adapter 5V pin disconnected to prevent back-feeding current into the host computer USB port.
+
+5. Linux Port Permissions:
+   - Add your Linux user account to the dialout group to access `/dev/ttyUSB0` without sudo:
+   ```bash
+   sudo usermod -aG dialout $USER
+   ```
+   - Check device detection using:
+   ```bash
+   ls -l /dev/ttyUSB*
+   dmesg | grep tty
+   ```
 
 ---
 
