@@ -52,6 +52,46 @@ export default function RoadSimulation2D({
     }
   }, []);
 
+  // Road surface presets: "asphalt" | "mud" | "dirt" | "cobble"
+  const ROAD_PRESETS = [
+    { id: "asphalt", label: "Asphalt", desc: "Highway Blacktop", dot: "bg-zinc-800 border-yellow-400" },
+    { id: "mud", label: "Mud Road", desc: "Wet Soft Ruts", dot: "bg-amber-900 border-amber-600" },
+    { id: "dirt", label: "Dirt Road", desc: "Gravel Washboard", dot: "bg-amber-600 border-amber-400" },
+    { id: "cobble", label: "Cobblestone", desc: "Stone Pavers", dot: "bg-zinc-400 border-zinc-500" },
+  ];
+
+  const [roadPreset, setRoadPreset] = useState(() => {
+    try {
+      const saved = localStorage.getItem("pothole_road_preset");
+      return ["asphalt", "mud", "dirt", "cobble"].includes(saved) ? saved : "asphalt";
+    } catch {
+      return "asphalt";
+    }
+  });
+
+  const handlePresetChange = useCallback((preset) => {
+    setRoadPreset(preset);
+    try {
+      localStorage.setItem("pothole_road_preset", preset);
+    } catch {
+      // ignore storage error
+    }
+  }, []);
+
+  const cycleRoadPreset = useCallback(() => {
+    const list = ["asphalt", "mud", "dirt", "cobble"];
+    setRoadPreset((curr) => {
+      const nextIdx = (list.indexOf(curr) + 1) % list.length;
+      const nextPreset = list[nextIdx];
+      try {
+        localStorage.setItem("pothole_road_preset", nextPreset);
+      } catch {
+        // ignore storage error
+      }
+      return nextPreset;
+    });
+  }, []);
+
   // Fallback to generator mode if hardware disconnects
   useEffect(() => {
     if (!isHardwareAvailable && simMode === "hardware") {
@@ -155,15 +195,23 @@ export default function RoadSimulation2D({
       { id: 2, worldX: 1400, type: "deep_pothole", depthCm: 12.0, widthCm: 65, detected: false },
       { id: 3, worldX: 2100, type: "bump", depthCm: -5.8, widthCm: 50, detected: false },
     ];
+    const nominalSurface =
+      roadPreset === "mud"
+        ? "Nominal Mud Track"
+        : roadPreset === "dirt"
+        ? "Nominal Dirt Road"
+        : roadPreset === "cobble"
+        ? "Nominal Cobblestone"
+        : "Nominal Asphalt";
     setHudStats((prev) => ({
       ...prev,
       detectedCount: 0,
       deviationCm: 0.0,
-      surfaceType: "Nominal Pavement",
+      surfaceType: nominalSurface,
       isAlert: false,
       severity: "None",
     }));
-  }, []);
+  }, [roadPreset]);
 
   // Sync with global Reset button trigger
   useEffect(() => {
@@ -276,11 +324,20 @@ export default function RoadSimulation2D({
           return;
         }
       }
+
+      // 'P' or 'p' to cycle road surface presets
+      if (e.key === "p" || e.key === "P") {
+        if (!e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          cycleRoadPreset();
+          return;
+        }
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [simMode, handleReset, onResetSimulation, spawnAnomaly, sensorAngleDeg, handleAngleChange]);
+  }, [simMode, handleReset, onResetSimulation, spawnAnomaly, sensorAngleDeg, handleAngleChange, cycleRoadPreset]);
 
   // Main Canvas Rendering Loop
   useEffect(() => {
@@ -364,8 +421,21 @@ export default function RoadSimulation2D({
           return 0;
         }
 
+        // Procedural baseline micro-elevation based on road preset
+        let baselineTexturePx = 0;
+        if (roadPreset === "dirt") {
+          // Gravel washboard ridges and micro-chatter (max ~1.5cm elevation)
+          baselineTexturePx = (Math.sin(worldX * 0.05) * 0.5 + Math.sin(worldX * 0.012) * 1.0) * pixelsPerCm;
+        } else if (roadPreset === "mud") {
+          // Rolling mud ruts and soft clay waves (max ~2.7cm elevation)
+          baselineTexturePx = (Math.sin(worldX * 0.015) * 1.5 + Math.cos(worldX * 0.007) * 1.2) * pixelsPerCm;
+        } else if (roadPreset === "cobble") {
+          // Paver camber and joint seams (max ~1.0cm elevation)
+          baselineTexturePx = (Math.sin(worldX * 0.10) * 0.4 + Math.cos(worldX * 0.02) * 0.6) * pixelsPerCm;
+        }
+
         // Generator mode: smooth cosine depression
-        let totalElevationPx = 0;
+        let totalElevationPx = baselineTexturePx;
         for (const anom of anomaliesRef.current) {
           const distToCenter = worldX - anom.worldX;
           const halfWidthPx = (anom.widthCm * pixelsPerCm) / 2;
@@ -429,7 +499,8 @@ export default function RoadSimulation2D({
         surfacePoints.push({ x: sx, y: baselineY + elev });
       }
 
-      // Subterranean Bedrock fill
+      // 2A. Clip everything to the road body cross-section
+      ctx.save();
       ctx.beginPath();
       ctx.moveTo(0, height);
       ctx.lineTo(0, surfacePoints[0].y);
@@ -438,52 +509,422 @@ export default function RoadSimulation2D({
       }
       ctx.lineTo(width, height);
       ctx.closePath();
-      ctx.fillStyle = "#18181b";
-      ctx.fill();
+      ctx.clip();
 
-      // Aggregate Base Layer
-      ctx.beginPath();
-      ctx.moveTo(surfacePoints[0].x, surfacePoints[0].y);
-      for (const p of surfacePoints) {
-        ctx.lineTo(p.x, p.y);
-      }
-      ctx.lineTo(width, surfacePoints[surfacePoints.length - 1].y + 24);
-      for (let i = surfacePoints.length - 1; i >= 0; i--) {
-        ctx.lineTo(surfacePoints[i].x, surfacePoints[i].y + 24);
-      }
-      ctx.closePath();
-      ctx.fillStyle = "#27272a";
-      ctx.fill();
+      if (roadPreset === "cobble") {
+        // --- COBBLESTONE ROAD TEXTURE & PATTERNS ---
+        // Bedrock / deep soil base
+        ctx.fillStyle = "#121214";
+        ctx.fillRect(0, 0, width, height);
 
-      // Road Surface Top Line (Technical White Line)
-      ctx.beginPath();
-      ctx.moveTo(surfacePoints[0].x, surfacePoints[0].y);
-      for (const p of surfacePoints) {
-        ctx.lineTo(p.x, p.y);
-      }
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      ctx.stroke();
+        // Crushed sand / gravel bedding layer below pavers
+        ctx.fillStyle = "#1f1f23";
+        ctx.beginPath();
+        ctx.moveTo(0, surfacePoints[0].y + 36);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y + 36);
+        }
+        ctx.lineTo(width, height);
+        ctx.lineTo(0, height);
+        ctx.closePath();
+        ctx.fill();
 
-      // Lane Divider Dashes
-      const dashLength = 28;
-      const gapLength = 24;
-      const totalDashUnit = dashLength + gapLength;
-      const laneOffset = (distanceTraveledRef.current % totalDashUnit);
+        // Bedding sand coarse speckles
+        ctx.fillStyle = "rgba(113, 113, 122, 0.3)";
+        const sandStep = 20;
+        const sandStartX = Math.floor(distanceTraveledRef.current / sandStep) * sandStep;
+        for (let mx = sandStartX; mx < distanceTraveledRef.current + width + sandStep; mx += sandStep) {
+          const sx = mx - distanceTraveledRef.current;
+          const elev = getTerrainElevationAtScreenX(sx);
+          const py = baselineY + elev + 44;
+          ctx.fillRect(sx, py + Math.abs((mx * 7) % 30), 2, 2);
+          ctx.fillRect(sx + 10, py + Math.abs((mx * 13) % 40), 1.5, 1.5);
+        }
 
-      ctx.save();
-      ctx.strokeStyle = "#52525b";
-      ctx.lineWidth = 2.5;
-      ctx.setLineDash([dashLength, gapLength]);
-      ctx.lineDashOffset = laneOffset;
-      ctx.beginPath();
-      for (let i = 0; i < surfacePoints.length; i++) {
-        const p = surfacePoints[i];
-        if (i === 0) ctx.moveTo(p.x, p.y + 20);
-        else ctx.lineTo(p.x, p.y + 20);
+        // 3 Staggered Rows of Rectangular/Rounded Cobblestone Pavers
+        const paverW = 28;
+        const paverH = 14;
+        const numRows = 3;
+        const paverRowColors = [
+          ["#3f3f46", "#52525b", "#333338"],
+          ["#2d2d32", "#3b3b40", "#26262a"],
+          ["#222226", "#29292e", "#1c1c20"],
+        ];
+
+        for (let row = 0; row < numRows; row++) {
+          const rowOffsetY = row * paverH;
+          const stagger = (row % 2) * (paverW / 2);
+          const startX = Math.floor((distanceTraveledRef.current - stagger) / paverW) * paverW + stagger;
+
+          for (let mx = startX; mx < distanceTraveledRef.current + width + paverW; mx += paverW) {
+            const sx = mx - distanceTraveledRef.current;
+            const elev = getTerrainElevationAtScreenX(sx + paverW / 2);
+            const blockTopY = baselineY + elev + rowOffsetY;
+
+            // Pseudo-random shade per paver stone based on mx world coordinate
+            const colorIdx = Math.abs(Math.floor((mx / paverW) * 3)) % 3;
+            ctx.fillStyle = paverRowColors[row][colorIdx];
+
+            // Draw stone block with mortar margin
+            ctx.beginPath();
+            if (ctx.roundRect) {
+              ctx.roundRect(sx + 1.5, blockTopY + 1.5, paverW - 3, paverH - 3, 2);
+            } else {
+              ctx.rect(sx + 1.5, blockTopY + 1.5, paverW - 3, paverH - 3);
+            }
+            ctx.fill();
+
+            // Beveled stone highlight line on top edge of each paver
+            if (row === 0) {
+              ctx.strokeStyle = "rgba(228, 228, 231, 0.45)";
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(sx + 3, blockTopY + 2.5);
+              ctx.lineTo(sx + paverW - 3, blockTopY + 2.5);
+              ctx.stroke();
+            }
+
+            // Dark mortar joint between stones
+            ctx.strokeStyle = "#121214";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(sx + 0.5, blockTopY + 0.5, paverW - 1, paverH - 1);
+          }
+        }
+      } else if (roadPreset === "mud") {
+        // --- MUD ROAD TEXTURE & PATTERNS ---
+        // Deep subterranean peat / dark bedrock
+        ctx.fillStyle = "#0c0805";
+        ctx.fillRect(0, 0, width, height);
+
+        // Subsoil clay stratum (lower mud layer)
+        ctx.beginPath();
+        ctx.moveTo(0, surfacePoints[0].y + 20);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y + 20);
+        }
+        ctx.lineTo(width, height);
+        ctx.lineTo(0, height);
+        ctx.closePath();
+        ctx.fillStyle = "#1e1109";
+        ctx.fill();
+
+        // Upper wet clay mud layer
+        ctx.beginPath();
+        ctx.moveTo(0, surfacePoints[0].y);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.lineTo(width, surfacePoints[surfacePoints.length - 1].y + 24);
+        for (let i = surfacePoints.length - 1; i >= 0; i--) {
+          ctx.lineTo(surfacePoints[i].x, surfacePoints[i].y + 24);
+        }
+        ctx.closePath();
+        ctx.fillStyle = "#33180c";
+        ctx.fill();
+
+        // Undulating organic mud rut flow striations
+        const rutOffsets = [6, 12, 18, 26];
+        const rutColors = [
+          "rgba(146, 64, 14, 0.6)",
+          "rgba(120, 53, 15, 0.45)",
+          "rgba(90, 40, 15, 0.35)",
+          "rgba(41, 24, 15, 0.5)",
+        ];
+        rutOffsets.forEach((off, idx) => {
+          ctx.save();
+          ctx.strokeStyle = rutColors[idx];
+          ctx.lineWidth = idx === 0 ? 2 : 1.5;
+          ctx.beginPath();
+          for (let i = 0; i < surfacePoints.length; i++) {
+            const p = surfacePoints[i];
+            const wave = Math.sin((distanceTraveledRef.current + p.x) * 0.03 + idx) * 2;
+            if (i === 0) ctx.moveTo(p.x, p.y + off + wave);
+            else ctx.lineTo(p.x, p.y + off + wave);
+          }
+          ctx.stroke();
+          ctx.restore();
+        });
+
+        // Embedded muddy river stones & soft clay lumps
+        ctx.fillStyle = "rgba(69, 26, 3, 0.65)";
+        const mudLumpStep = 36;
+        const mudStartX = Math.floor(distanceTraveledRef.current / mudLumpStep) * mudLumpStep;
+        for (let mx = mudStartX; mx < distanceTraveledRef.current + width + mudLumpStep; mx += mudLumpStep) {
+          const sx = mx - distanceTraveledRef.current;
+          const elev = getTerrainElevationAtScreenX(sx);
+          const py = baselineY + elev + 10;
+          ctx.beginPath();
+          ctx.ellipse(sx, py + Math.abs((mx * 5) % 18), 5 + Math.abs((mx * 3) % 4), 2.5, 0.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Wet puddle pooling in low spots / craters
+        for (const anom of anomaliesRef.current) {
+          const sx = anom.worldX - distanceTraveledRef.current;
+          const halfW = (anom.widthCm * pixelsPerCm) / 2;
+          if (anom.depthCm > 3.0 && sx > -100 && sx < width + 100) {
+            const poolY = baselineY + (anom.depthCm * pixelsPerCm * 0.45);
+            ctx.save();
+            ctx.fillStyle = "rgba(180, 83, 9, 0.35)";
+            ctx.fillRect(sx - halfW * 0.8, poolY, halfW * 1.6, anom.depthCm * pixelsPerCm);
+            // Puddle water glassy reflection surface
+            ctx.strokeStyle = "rgba(251, 191, 36, 0.5)";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(sx - halfW * 0.7, poolY);
+            ctx.lineTo(sx + halfW * 0.7, poolY);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+      } else if (roadPreset === "dirt") {
+        // --- DIRT & GRAVEL ROAD TEXTURE & PATTERNS ---
+        // Deep packed bedrock
+        ctx.fillStyle = "#14110e";
+        ctx.fillRect(0, 0, width, height);
+
+        // Compacted hardpack clay layer
+        ctx.beginPath();
+        ctx.moveTo(0, surfacePoints[0].y + 22);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y + 22);
+        }
+        ctx.lineTo(width, height);
+        ctx.lineTo(0, height);
+        ctx.closePath();
+        ctx.fillStyle = "#291e14";
+        ctx.fill();
+
+        // Upper gravel and sand wear stratum
+        ctx.beginPath();
+        ctx.moveTo(0, surfacePoints[0].y);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.lineTo(width, surfacePoints[surfacePoints.length - 1].y + 24);
+        for (let i = surfacePoints.length - 1; i >= 0; i--) {
+          ctx.lineTo(surfacePoints[i].x, surfacePoints[i].y + 24);
+        }
+        ctx.closePath();
+        ctx.fillStyle = "#4a3525";
+        ctx.fill();
+
+        // Horizontal compaction striation lines
+        ctx.save();
+        ctx.strokeStyle = "rgba(161, 98, 7, 0.3)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([12, 16]);
+        ctx.lineDashOffset = (distanceTraveledRef.current % 28);
+        ctx.beginPath();
+        for (let i = 0; i < surfacePoints.length; i++) {
+          const p = surfacePoints[i];
+          if (i === 0) ctx.moveTo(p.x, p.y + 12);
+          else ctx.lineTo(p.x, p.y + 12);
+        }
+        ctx.stroke();
+        ctx.restore();
+
+        // High density of distinct gravel pebbles and stone chips
+        const pebbleStep = 26;
+        const pebbleStartX = Math.floor(distanceTraveledRef.current / pebbleStep) * pebbleStep;
+        for (let mx = pebbleStartX; mx < distanceTraveledRef.current + width + pebbleStep; mx += pebbleStep) {
+          const sx = mx - distanceTraveledRef.current;
+          const elev = getTerrainElevationAtScreenX(sx);
+          const py = baselineY + elev;
+
+          // Upper fine gravel pebbles
+          ctx.fillStyle = (mx % 2 === 0) ? "#a88a6d" : "#785e45";
+          ctx.beginPath();
+          ctx.arc(sx, py + 5 + Math.abs((mx * 3) % 12), 2 + Math.abs((mx * 2) % 2), 0, Math.PI * 2);
+          ctx.fill();
+
+          // Medium sub-surface stones
+          ctx.fillStyle = (mx % 3 === 0) ? "#b48c68" : "#57422f";
+          ctx.beginPath();
+          ctx.arc(sx + 12, py + 16 + Math.abs((mx * 7) % 18), 3 + Math.abs(mx % 3), 0, Math.PI * 2);
+          ctx.fill();
+
+          // Stone contour edge
+          ctx.strokeStyle = "rgba(20, 16, 12, 0.7)";
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
+        }
+
+        // Gritty sand stipple specks along the surface
+        ctx.fillStyle = "rgba(254, 215, 170, 0.4)";
+        for (let mx = pebbleStartX; mx < distanceTraveledRef.current + width + pebbleStep; mx += 14) {
+          const sx = mx - distanceTraveledRef.current;
+          const elev = getTerrainElevationAtScreenX(sx);
+          ctx.fillRect(sx, baselineY + elev + 3, 1.5, 1.5);
+          ctx.fillRect(sx + 6, baselineY + elev + 7, 1.5, 1.5);
+        }
+      } else {
+        // --- ASPHALT HIGHWAY TEXTURE & PATTERNS ---
+        // Deep subgrade foundation
+        ctx.fillStyle = "#111113";
+        ctx.fillRect(0, 0, width, height);
+
+        // Crushed aggregate base course layer
+        ctx.beginPath();
+        ctx.moveTo(0, surfacePoints[0].y + 16);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y + 16);
+        }
+        ctx.lineTo(width, height);
+        ctx.lineTo(0, height);
+        ctx.closePath();
+        ctx.fillStyle = "#1e1e22";
+        ctx.fill();
+
+        // Crushed angular rock aggregate matrix
+        ctx.strokeStyle = "rgba(82, 82, 91, 0.4)";
+        ctx.lineWidth = 1;
+        const stoneStep = 24;
+        const stoneStartX = Math.floor(distanceTraveledRef.current / stoneStep) * stoneStep;
+        for (let mx = stoneStartX; mx < distanceTraveledRef.current + width + stoneStep; mx += stoneStep) {
+          const sx = mx - distanceTraveledRef.current;
+          const elev = getTerrainElevationAtScreenX(sx);
+          const py = baselineY + elev + 22;
+
+          // Angular fractured stone chip polygons
+          ctx.fillStyle = (mx % 2 === 0) ? "#2d2d33" : "#383840";
+          ctx.beginPath();
+          const chipOff = Math.abs((mx * 3) % 16);
+          ctx.moveTo(sx, py + chipOff);
+          ctx.lineTo(sx + 5, py + chipOff - 3);
+          ctx.lineTo(sx + 8, py + chipOff + 4);
+          ctx.lineTo(sx + 2, py + chipOff + 6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        // Top bituminous asphalt wearing course (dense blacktop)
+        ctx.beginPath();
+        ctx.moveTo(0, surfacePoints[0].y);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.lineTo(width, surfacePoints[surfacePoints.length - 1].y + 16);
+        for (let i = surfacePoints.length - 1; i >= 0; i--) {
+          ctx.lineTo(surfacePoints[i].x, surfacePoints[i].y + 16);
+        }
+        ctx.closePath();
+        ctx.fillStyle = "#27272a";
+        ctx.fill();
+
+        // Asphalt fine aggregate crystalline micro-specks
+        ctx.fillStyle = "rgba(161, 161, 170, 0.35)";
+        for (let mx = stoneStartX; mx < distanceTraveledRef.current + width + stoneStep; mx += 16) {
+          const sx = mx - distanceTraveledRef.current;
+          const elev = getTerrainElevationAtScreenX(sx);
+          ctx.fillRect(sx + 4, baselineY + elev + 4, 1.5, 1.5);
+          ctx.fillRect(sx + 10, baselineY + elev + 9, 1.2, 1.2);
+        }
       }
-      ctx.stroke();
-      ctx.restore();
+
+      ctx.restore(); // Exit clipped cross-section
+
+      // 2B. Draw the Surface Boundary Line & Markings (Unclipped)
+      if (roadPreset === "cobble") {
+        // Cobblestone domed paver caps along the top edge
+        const paverW = 28;
+        const startX = Math.floor(distanceTraveledRef.current / paverW) * paverW;
+        for (let mx = startX; mx < distanceTraveledRef.current + width + paverW; mx += paverW) {
+          const sx = mx - distanceTraveledRef.current;
+          const elev1 = getTerrainElevationAtScreenX(sx);
+          const elevMid = getTerrainElevationAtScreenX(sx + paverW / 2);
+          const elev2 = getTerrainElevationAtScreenX(sx + paverW);
+
+          ctx.beginPath();
+          ctx.moveTo(sx, baselineY + elev1);
+          ctx.quadraticCurveTo(sx + paverW / 2, baselineY + elevMid - 2.5, sx + paverW, baselineY + elev2);
+          ctx.strokeStyle = "#e4e4e7";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Mortar gap notch
+          ctx.beginPath();
+          ctx.moveTo(sx, baselineY + elev1 - 1);
+          ctx.lineTo(sx, baselineY + elev1 + 3);
+          ctx.strokeStyle = "#18181b";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      } else if (roadPreset === "mud") {
+        // Mud organic soft top boundary
+        ctx.beginPath();
+        ctx.moveTo(surfacePoints[0].x, surfacePoints[0].y);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.strokeStyle = "#b45309";
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        // Wet mud glossy highlight ridge
+        ctx.beginPath();
+        ctx.moveTo(surfacePoints[0].x, surfacePoints[0].y);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y - 0.5);
+        }
+        ctx.strokeStyle = "rgba(245, 158, 11, 0.4)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else if (roadPreset === "dirt") {
+        // Gritty sand/dirt surface line
+        ctx.beginPath();
+        ctx.moveTo(surfacePoints[0].x, surfacePoints[0].y);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.strokeStyle = "#e2b17a";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Coarse gravel ridge stipple along top
+        ctx.strokeStyle = "rgba(251, 191, 36, 0.35)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 6]);
+        ctx.beginPath();
+        for (let i = 0; i < surfacePoints.length; i++) {
+          const p = surfacePoints[i];
+          if (i === 0) ctx.moveTo(p.x, p.y - 1);
+          else ctx.lineTo(p.x, p.y - 1);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        // Clean Asphalt Highway Surface Line & Yellow Highway Center Markings
+        ctx.beginPath();
+        ctx.moveTo(surfacePoints[0].x, surfacePoints[0].y);
+        for (const p of surfacePoints) {
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2.2;
+        ctx.stroke();
+
+        // Vivid Yellow Highway Center Dashes
+        const dashLength = 32;
+        const gapLength = 26;
+        const totalDashUnit = dashLength + gapLength;
+        const laneOffset = (distanceTraveledRef.current % totalDashUnit);
+
+        ctx.save();
+        ctx.strokeStyle = "#eab308"; // High-visibility highway yellow
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([dashLength, gapLength]);
+        ctx.lineDashOffset = laneOffset;
+        ctx.beginPath();
+        for (let i = 0; i < surfacePoints.length; i++) {
+          const p = surfacePoints[i];
+          if (i === 0) ctx.moveTo(p.x, p.y + 18);
+          else ctx.lineTo(p.x, p.y + 18);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
 
       // -------------------------------------------------------------
       // 3. ANOMALY LABELS ON ROAD
@@ -509,7 +950,12 @@ export default function RoadSimulation2D({
             ctx.font = "bold 9px monospace";
             ctx.textAlign = "center";
             const labelY = isPothole ? baselineY - 14 : baselineY - depthPx - 14;
-            ctx.fillText(`${isDeep ? "CRITICAL POTHOLE" : isPothole ? "POTHOLE" : "BUMP"}: ${Math.abs(anom.depthCm)}cm`, sx, labelY);
+            const tagTitle = isDeep
+              ? (roadPreset === "mud" ? "DEEP RUT" : roadPreset === "dirt" ? "WASHOUT" : roadPreset === "cobble" ? "SUNKEN PAVER" : "CRITICAL POTHOLE")
+              : isPothole
+                ? (roadPreset === "mud" ? "MUD HOLE" : roadPreset === "dirt" ? "DEPRESSION" : roadPreset === "cobble" ? "PAVER HOLE" : "POTHOLE")
+                : (roadPreset === "mud" ? "MUD RIDGE" : roadPreset === "dirt" ? "GRAVEL MOUND" : roadPreset === "cobble" ? "PAVER BUMP" : "BUMP");
+            ctx.fillText(`${tagTitle}: ${Math.abs(anom.depthCm)}cm`, sx, labelY);
             ctx.restore();
           }
         }
@@ -874,13 +1320,28 @@ export default function RoadSimulation2D({
       let isBump = deltaVerticalCm < -bumpThresh;
       let isAnomaly = isPothole || isBump;
 
-      let activeClass = "Nominal Pavement";
+      // Surface Type Title
+      let nominalTitle = "Nominal Asphalt";
+      if (roadPreset === "mud") nominalTitle = "Nominal Mud Track";
+      else if (roadPreset === "dirt") nominalTitle = "Nominal Dirt Road";
+      else if (roadPreset === "cobble") nominalTitle = "Nominal Cobblestone";
+
+      let activeClass = nominalTitle;
       if (isDeep) {
-        activeClass = "Deep Pothole";
+        if (roadPreset === "mud") activeClass = "Deep Mud Rut";
+        else if (roadPreset === "dirt") activeClass = "Severe Washout";
+        else if (roadPreset === "cobble") activeClass = "Sunken Paver Pit";
+        else activeClass = "Deep Pothole";
       } else if (isPothole) {
-        activeClass = "Shallow Pothole";
+        if (roadPreset === "mud") activeClass = "Mud Pothole";
+        else if (roadPreset === "dirt") activeClass = "Gravel Depression";
+        else if (roadPreset === "cobble") activeClass = "Loose Paver Hole";
+        else activeClass = "Shallow Pothole";
       } else if (isBump) {
-        activeClass = "Speed Bump";
+        if (roadPreset === "mud") activeClass = "Mud Ridge";
+        else if (roadPreset === "dirt") activeClass = "Gravel Mound";
+        else if (roadPreset === "cobble") activeClass = "Raised Paver Stone";
+        else activeClass = "Speed Bump";
       }
 
       // Flag oncoming anomaly in generator mode
@@ -893,10 +1354,42 @@ export default function RoadSimulation2D({
               anom.detected = true;
               detectedCountRef.current += 1;
 
+              const isDeepAnom = anom.type === "deep_pothole";
+              const isPotholeAnom = anom.type === "pothole";
+              let detectedTypeName = "Speed Bump";
+              if (isDeepAnom) {
+                detectedTypeName =
+                  roadPreset === "mud"
+                    ? "Deep Mud Rut"
+                    : roadPreset === "dirt"
+                    ? "Severe Washout"
+                    : roadPreset === "cobble"
+                    ? "Sunken Paver Pit"
+                    : "Deep Pothole";
+              } else if (isPotholeAnom) {
+                detectedTypeName =
+                  roadPreset === "mud"
+                    ? "Mud Pothole"
+                    : roadPreset === "dirt"
+                    ? "Gravel Depression"
+                    : roadPreset === "cobble"
+                    ? "Loose Paver Hole"
+                    : "Shallow Pothole";
+              } else {
+                detectedTypeName =
+                  roadPreset === "mud"
+                    ? "Mud Ridge"
+                    : roadPreset === "dirt"
+                    ? "Gravel Mound"
+                    : roadPreset === "cobble"
+                    ? "Raised Paver Stone"
+                    : "Speed Bump";
+              }
+
               const detectedObj = {
                 id: Date.now(),
                 time: new Date().toLocaleTimeString(),
-                type: anom.type === "deep_pothole" ? "Deep Pothole" : anom.type === "pothole" ? "Shallow Pothole" : "Speed Bump",
+                type: detectedTypeName,
                 deviation_cm: `${anom.depthCm > 0 ? "+" : ""}${anom.depthCm.toFixed(1)}`,
                 depth_cm: Math.abs(anom.depthCm),
                 length_cm: anom.widthCm,
@@ -1051,7 +1544,7 @@ export default function RoadSimulation2D({
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [isRunning, simSpeedKmph, simMode, autoSpawn, settings, spawnAnomaly, onSimulatedAnomaly, isHardwareAvailable, sensorAngleDeg]);
+  }, [isRunning, simSpeedKmph, simMode, autoSpawn, settings, spawnAnomaly, onSimulatedAnomaly, isHardwareAvailable, sensorAngleDeg, roadPreset]);
 
   return (
     <div className="space-y-4">
@@ -1106,6 +1599,28 @@ export default function RoadSimulation2D({
               {!isHardwareAvailable && <Lock className="w-3 h-3 text-zinc-400" />}
               <span>Hardware Sync</span>
             </button>
+          </div>
+
+          {/* Road Surface Preset Selector */}
+          <div className="flex items-center bg-zinc-100 p-0.5 rounded-md border border-zinc-200 text-xs">
+            <span className="px-2 py-0.5 text-[10px] font-mono text-zinc-400 uppercase hidden md:inline">Road:</span>
+            {ROAD_PRESETS.map((p) => {
+              const isSelected = roadPreset === p.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => handlePresetChange(p.id)}
+                  title={`${p.label}: ${p.desc} (Key P to cycle)`}
+                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded font-medium transition-colors ${isSelected
+                    ? "bg-white text-zinc-900 shadow-xs font-semibold"
+                    : "text-zinc-500 hover:text-zinc-900"
+                    }`}
+                >
+                  <span className={`w-2 h-2 rounded-full border ${p.dot}`} />
+                  <span>{p.label}</span>
+                </button>
+              );
+            })}
           </div>
 
           {/* Play / Pause Toggle */}
@@ -1521,6 +2036,13 @@ export default function RoadSimulation2D({
                   <kbd className="px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold">H</kbd>
                 </div>
                 <span className="text-zinc-600 text-right">Toggle Road Hazards</span>
+              </div>
+
+              <div className="grid grid-cols-2 py-1.5 border-b border-zinc-100 items-center">
+                <div className="flex items-center space-x-1">
+                  <kbd className="px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold">P</kbd>
+                </div>
+                <span className="text-zinc-600 text-right">Cycle Road Preset</span>
               </div>
 
               <div className="grid grid-cols-2 py-1.5 items-center">
