@@ -54,6 +54,8 @@ htmlcov/
 # Logs and databases
 *.log
 logs/
+cache/
+.cache/
 *.sqlite3
 *.db
 

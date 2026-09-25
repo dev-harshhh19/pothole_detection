@@ -1,10 +1,12 @@
 import React from "react";
-import { Radio, RefreshCw, Wrench, Settings } from "lucide-react";
+import { Radio, RefreshCw, Wrench, Settings, LayoutDashboard, Bike } from "lucide-react";
 
 export default function Navbar({
   connected,
   isSimulated,
   status,
+  activeTab = "dashboard",
+  onTabChange,
   onOpenSettings,
   onOpenDiagnostic,
   onResetMetrics,
@@ -45,6 +47,33 @@ export default function Navbar({
             </div>
           </div>
         </div>
+
+        {/* Navigation Page Switcher */}
+        <nav className="flex items-center space-x-1 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200">
+          <button
+            onClick={() => onTabChange && onTabChange("dashboard")}
+            className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition ${
+              activeTab === "dashboard"
+                ? "bg-white text-zinc-950 shadow-xs font-semibold"
+                : "text-zinc-600 hover:text-zinc-950"
+            }`}
+          >
+            <LayoutDashboard className="w-3.5 h-3.5 text-zinc-500" />
+            <span>Dashboard</span>
+          </button>
+
+          <button
+            onClick={() => onTabChange && onTabChange("simulation")}
+            className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition ${
+              activeTab === "simulation"
+                ? "bg-white text-zinc-950 shadow-xs font-semibold"
+                : "text-zinc-600 hover:text-zinc-950"
+            }`}
+          >
+            <Bike className="w-3.5 h-3.5 text-zinc-500" />
+            <span>2D Simulation</span>
+          </button>
+        </nav>
 
         <div className="flex items-center space-x-2.5">
           {/* Connection status indicator */}

@@ -12,6 +12,7 @@ import logging
 import random
 import threading
 import time
+from pathlib import Path
 from collections import deque
 from typing import Dict, Any, List, Optional
 
@@ -68,6 +69,12 @@ SEVERITY_BANDS = [
     (8, 15, "Moderate"),
     (15, 999, "Deep / Dangerous"),
 ]
+
+# Persistent cache directories and files
+BASE_DIR = Path(__file__).resolve().parent
+CACHE_DIR = BASE_DIR / "cache"
+DETECTIONS_CACHE_FILE = CACHE_DIR / "detections.json"
+SETTINGS_CACHE_FILE = CACHE_DIR / "settings.json"
 
 
 # ML Model Loader
@@ -216,9 +223,93 @@ class SystemManager:
             "cooldown_remaining": 0.0,
         }
 
+        # Load persistent cache
+        self._load_cache()
+
         # Background processing worker
         self.worker_thread = threading.Thread(target=self._process_loop, daemon=True)
         self.worker_thread.start()
+
+    def _load_cache(self):
+        """Loads cached settings and historical detections from disk."""
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            if SETTINGS_CACHE_FILE.exists():
+                with open(SETTINGS_CACHE_FILE, "r", encoding="utf-8") as f:
+                    s = json.load(f)
+                    self.speed_kmph = float(s.get("speed_kmph", self.speed_kmph))
+                    self.pot_thresh = float(s.get("pot_thresh", self.pot_thresh))
+                    self.deep_thresh = float(s.get("deep_thresh", self.deep_thresh))
+                    self.bump_thresh = float(s.get("bump_thresh", self.bump_thresh))
+                    self.confirm_n = int(s.get("confirm_n", self.confirm_n))
+                    self.cooldown_s = float(s.get("cooldown_s", self.cooldown_s))
+                    if "port" in s:
+                        self.port = str(s["port"])
+                    if "baudrate" in s:
+                        self.baudrate = int(s["baudrate"])
+                logger.info("Loaded cached settings from %s", SETTINGS_CACHE_FILE)
+
+            if DETECTIONS_CACHE_FILE.exists():
+                with open(DETECTIONS_CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        self.detection_log = data[:100]
+                    elif isinstance(data, dict):
+                        self.detection_log = data.get("log", [])[:100]
+                        self.pothole_count = int(data.get("pothole_count", 0))
+                        self.bump_count = int(data.get("bump_count", 0))
+                        self.last_depth = float(data.get("last_depth", 0.0))
+
+                    if not self.pothole_count and not self.bump_count and self.detection_log:
+                        for item in self.detection_log:
+                            t = str(item.get("type", "")).lower()
+                            if "pothole" in t:
+                                self.pothole_count += 1
+                            elif "bump" in t:
+                                self.bump_count += 1
+                        if self.detection_log:
+                            self.last_depth = float(self.detection_log[0].get("depth_cm", 0.0))
+                logger.info("Loaded %d cached detections from %s", len(self.detection_log), DETECTIONS_CACHE_FILE)
+        except Exception as exc:
+            logger.warning("Could not load persistent cache: %s", exc)
+
+    def _save_settings_cache(self):
+        """Saves current settings and serial parameters to disk cache."""
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "speed_kmph": self.speed_kmph,
+                "pot_thresh": self.pot_thresh,
+                "deep_thresh": self.deep_thresh,
+                "bump_thresh": self.bump_thresh,
+                "confirm_n": self.confirm_n,
+                "cooldown_s": self.cooldown_s,
+                "port": self.port,
+                "baudrate": self.baudrate,
+            }
+            tmp = SETTINGS_CACHE_FILE.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            tmp.replace(SETTINGS_CACHE_FILE)
+        except Exception as exc:
+            logger.warning("Could not save settings cache: %s", exc)
+
+    def _save_detections_cache(self):
+        """Saves detection log and anomaly metrics to disk cache."""
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "pothole_count": self.pothole_count,
+                "bump_count": self.bump_count,
+                "last_depth": self.last_depth,
+                "log": self.detection_log[:100],
+            }
+            tmp = DETECTIONS_CACHE_FILE.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            tmp.replace(DETECTIONS_CACHE_FILE)
+        except Exception as exc:
+            logger.warning("Could not save detections cache: %s", exc)
 
     def get_speed_cm_s(self) -> float:
         return (self.speed_kmph * 100_000) / 3600
@@ -293,6 +384,7 @@ class SystemManager:
                 self.status = "connected"
                 self.status_message = f"Connected to {self.port} at {self.baudrate} baud"
                 logger.info(f"Hardware sensor connected on {self.port}")
+                self._save_settings_cache()
                 return {"success": True, "message": self.status_message, "simulated": False}
             except Exception as exc:
                 self.status = "error"
@@ -344,6 +436,7 @@ class SystemManager:
             self.calibrated = False
             self.dist_buf.clear()
             self.str_buf.clear()
+            self._save_detections_cache()
             return {"success": True, "message": "Metrics and histories reset"}
 
     def _process_loop(self):
@@ -479,6 +572,7 @@ class SystemManager:
                     self.detection_log.insert(0, log_entry)
                     if len(self.detection_log) > 100:
                         self.detection_log.pop()
+                    self._save_detections_cache()
 
                     is_alert = True
                     alert_msg = f"{CLASS_LABELS[final_cls]} Confirmed (Depth: {dims['depth_cm']} cm, Severity: {dims['severity']})"
@@ -583,11 +677,26 @@ def update_settings(req: SettingsRequest):
             manager.confirm_n = max(1, req.confirm_n)
         if req.cooldown_s is not None:
             manager.cooldown_s = max(0.5, req.cooldown_s)
-    return {"success": True, "message": "Settings updated"}
+        manager._save_settings_cache()
+    return {"success": True, "message": "Settings updated and cached"}
 
 @app.post("/api/reset")
 def reset_counts():
     return manager.reset_metrics()
+
+@app.post("/api/cache/clear")
+def clear_cache():
+    with manager.lock:
+        try:
+            if DETECTIONS_CACHE_FILE.exists():
+                DETECTIONS_CACHE_FILE.unlink()
+            manager.detection_log.clear()
+            manager.pothole_count = 0
+            manager.bump_count = 0
+            manager.last_depth = 0.0
+            return {"success": True, "message": "Persistent detection cache cleared"}
+        except Exception as exc:
+            return {"success": False, "message": f"Error clearing cache: {exc}"}
 
 @app.get("/api/log")
 def get_log():
