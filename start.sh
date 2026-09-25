@@ -1,163 +1,198 @@
 #!/bin/bash
-# ──────────────────────────────────────────────────────────────────────────────
-#  Pothole Detection System — Raspberry Pi 4B
-#  Single-command launcher: starts everything in one terminal session.
+# ------------------------------------------------------------------------------
+# Pothole Detection System
+# Single-command launcher for backend API and ReactJS UI.
 #
-#  Usage:
-#    ./start.sh           → Setup (if needed) + realtime detector + dashboard
-#    ./start.sh --dl      → Use the Deep Learning dashboard instead of ML
-#    ./start.sh --setup   → Force re-run setup only
-# ──────────────────────────────────────────────────────────────────────────────
+# Usage:
+#   ./start.sh          : Activate venv (or create), setup, and start server
+#   ./start.sh --setup  : Force reinstall of dependencies
+#   ./start.sh --dev    : Run Vite dev server on port 3000 alongside backend
+# ------------------------------------------------------------------------------
 
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV="$PROJECT_DIR/venv"
-PY="$VENV/bin/python"
-ST="$VENV/bin/streamlit"
-LIDAR_PORT="${LIDAR_PORT:-/dev/ttyUSB0}"
+PORT=8000
 
-# ── Parse args ────────────────────────────────────────────────────────────────
-USE_DL=false
+# Terminal styles
+B="\033[1m"; G="\033[92m"; Y="\033[93m"; R="\033[91m"; C="\033[96m"; X="\033[0m"
+info()  { echo -e "${G}${B}[OK]${X} $*"; }
+warn()  { echo -e "${Y}${B}[WARN]${X} $*"; }
+error() { echo -e "${R}${B}[ERROR]${X} $*"; exit 1; }
+head()  { echo -e "\n${C}${B}=== $* ===${X}"; }
+
+# Banner
+clear
+echo -e "${C}${B}"
+echo "  +--------------------------------------------+"
+echo "  |   TF02-Pro LiDAR Pothole Detection System  |"
+echo "  |   Unified FastAPI + ReactJS Application    |"
+echo "  +--------------------------------------------+"
+echo -e "${X}"
+
+# Parse flags
+DEV_MODE=false
 FORCE_SETUP=false
 for arg in "$@"; do
     case $arg in
-        --dl)      USE_DL=true ;;
+        --dev)     DEV_MODE=true ;;
         --setup)   FORCE_SETUP=true ;;
     esac
 done
 
-# ── Colours ───────────────────────────────────────────────────────────────────
-B="\033[1m"; G="\033[92m"; Y="\033[93m"; R="\033[91m"; C="\033[96m"; X="\033[0m"
-info()  { echo -e "${G}${B}[✔]${X} $*"; }
-warn()  { echo -e "${Y}${B}[!]${X} $*"; }
-error() { echo -e "${R}${B}[✘]${X} $*"; exit 1; }
-head()  { echo -e "\n${C}${B}━━━ $* ━━━${X}"; }
+# Step 1: Detect, create, and switch into Virtual Environment
+head "Virtual Environment"
 
-# ── Banner ────────────────────────────────────────────────────────────────────
-clear
-echo -e "${C}${B}"
-echo "  ╔══════════════════════════════════════════╗"
-echo "  ║   🕳️  Pothole Detection System           ║"
-echo "  ║       Raspberry Pi 4B  —  TF02-Pro       ║"
-echo "  ╚══════════════════════════════════════════╝"
-echo -e "${X}"
+# Locate .venv or venv directory
+if [ -d "$PROJECT_DIR/.venv" ]; then
+    VENV_DIR="$PROJECT_DIR/.venv"
+elif [ -d "$PROJECT_DIR/venv" ]; then
+    VENV_DIR="$PROJECT_DIR/venv"
+else
+    VENV_DIR="$PROJECT_DIR/.venv"
+fi
 
-# ── Setup ─────────────────────────────────────────────────────────────────────
+# Detect bootstrap python if venv does not exist yet
+BOOTSTRAP_PY="python3"
+if ! command -v "$BOOTSTRAP_PY" >/dev/null 2>&1; then
+    BOOTSTRAP_PY="python"
+fi
+
+if [ ! -d "$VENV_DIR" ]; then
+    warn "No virtual environment detected. Creating: $VENV_DIR"
+    "$BOOTSTRAP_PY" -m venv "$VENV_DIR"
+    info "Created virtual environment at $VENV_DIR"
+fi
+
+# Find activate script and binaries (supports Linux, macOS, and Windows Git Bash)
+ACTIVATE_SCRIPT=""
+if [ -f "$VENV_DIR/bin/activate" ]; then
+    ACTIVATE_SCRIPT="$VENV_DIR/bin/activate"
+    VENV_BIN="$VENV_DIR/bin"
+    PY="$VENV_DIR/bin/python"
+    PIP="$VENV_DIR/bin/pip"
+elif [ -f "$VENV_DIR/Scripts/activate" ]; then
+    ACTIVATE_SCRIPT="$VENV_DIR/Scripts/activate"
+    VENV_BIN="$VENV_DIR/Scripts"
+    PY="$VENV_DIR/Scripts/python"
+    PIP="$VENV_DIR/Scripts/pip"
+else
+    error "Cannot find activate script in $VENV_DIR"
+fi
+
+# Switch environment if running in normal terminal
+if [ "$VIRTUAL_ENV" != "$VENV_DIR" ]; then
+    if [ -n "$ACTIVATE_SCRIPT" ] && [ -f "$ACTIVATE_SCRIPT" ]; then
+        # shellcheck disable=SC1090
+        source "$ACTIVATE_SCRIPT"
+        info "Switched terminal session to virtual environment: $VENV_DIR"
+    else
+        export PATH="$VENV_BIN:$PATH"
+        export VIRTUAL_ENV="$VENV_DIR"
+        info "Updated PATH to virtual environment: $VENV_BIN"
+    fi
+else
+    info "Already running inside virtual environment: $VENV_DIR"
+fi
+
+# Step 2: Install or verify dependencies
 do_setup() {
-    head "Setup"
+    head "Setup Dependencies"
 
-    info "Creating Python virtual environment …"
-    python3 -m venv "$VENV"
-    "$VENV/bin/pip" install --upgrade pip --quiet
+    info "Upgrading pip in virtual environment..."
+    "$PIP" install --upgrade pip --quiet || true
 
-    info "Installing root requirements …"
-    "$VENV/bin/pip" install -r "$PROJECT_DIR/requirements.txt" --quiet
+    info "Installing Python dependencies from requirements.txt..."
+    "$PIP" install -r "$PROJECT_DIR/requirements.txt" --quiet
 
-    info "Installing DL_Model requirements …"
-    "$VENV/bin/pip" install -r "$PROJECT_DIR/DL_Model/requirements.txt" --quiet
-
-    if ! groups "$USER" | grep -qw dialout; then
-        warn "Adding $USER to 'dialout' group for serial port access …"
-        sudo usermod -aG dialout "$USER"
-        warn "Group change applied. A re-login is needed for it to persist,"
-        warn "but this session will proceed via 'sg dialout'."
+    if command -v id >/dev/null 2>&1; then
+        if ! id -nG "$USER" 2>/dev/null | grep -qw dialout; then
+            warn "Note: On Linux/Raspberry Pi, add your user to 'dialout' group for serial port access:"
+            warn "  sudo usermod -aG dialout $USER"
+        fi
     fi
 
-    info "Setup complete."
+    if [ -d "$PROJECT_DIR/frontend" ]; then
+        cd "$PROJECT_DIR/frontend"
+        if [ ! -d "node_modules" ]; then
+            info "Installing frontend npm packages..."
+            npm install --quiet
+        fi
+        info "Building production React frontend..."
+        npm run build
+        cd "$PROJECT_DIR"
+    fi
+
+    info "Setup completed successfully."
 }
 
-# Run setup if venv missing or forced
-if [ ! -f "$PY" ] || [ "$FORCE_SETUP" = true ]; then
+# Auto-run setup if dependencies are missing or if forced
+if [ "$FORCE_SETUP" = true ]; then
+    do_setup
+elif ! "$PY" -c "import fastapi, serial, uvicorn, sklearn, websockets" >/dev/null 2>&1; then
+    warn "Required Python modules not found in virtual environment. Running setup..."
     do_setup
 fi
 
-# ── Train models if missing ───────────────────────────────────────────────────
-head "Checking Models"
-
+# Step 3: Check ML model
+head "Checking ML Model"
 if [ ! -f "$PROJECT_DIR/pothole_model.pkl" ]; then
-    warn "ML model not found — training now …"
+    warn "ML model not found. Training pothole_model.pkl..."
     cd "$PROJECT_DIR"
     "$PY" model_train.py
-    info "ML model trained."
+    info "ML model trained successfully."
 else
-    info "ML model found."
+    info "ML model found (pothole_model.pkl)."
 fi
 
-DL_MODEL="$PROJECT_DIR/DL_Model/models/pothole_dl_model.keras"
-if [ ! -f "$DL_MODEL" ] && [ "$USE_DL" = true ]; then
-    warn "DL model not found — training now (may take a few minutes) …"
-    export CUDA_VISIBLE_DEVICES=-1
-    cd "$PROJECT_DIR/DL_Model"
-    "$PY" train.py
-    info "DL model trained."
-elif [ -f "$DL_MODEL" ]; then
-    info "DL model found."
+# Step 4: Ensure React production build exists
+if [ ! -d "$PROJECT_DIR/frontend/dist" ]; then
+    warn "Frontend dist build not found. Building now..."
+    cd "$PROJECT_DIR/frontend"
+    if [ ! -d "node_modules" ]; then
+        npm install
+    fi
+    npm run build
+    cd "$PROJECT_DIR"
+    info "Frontend build ready."
 fi
 
-# ── Network info ──────────────────────────────────────────────────────────────
-PI_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-DASH_PORT=8501
-[ "$USE_DL" = true ] && DASH_PORT=8502
-DASH_SCRIPT="dashboard.py"
-DASH_CWD="$PROJECT_DIR"
-[ "$USE_DL" = true ] && DASH_SCRIPT="dashboard_dl.py" && DASH_CWD="$PROJECT_DIR/DL_Model"
-
-# ── Trap: clean up on Ctrl+C ──────────────────────────────────────────────────
+# Step 5: Clean shutdown handler
 PIDS=()
 cleanup() {
     echo ""
-    warn "Shutting down …"
+    warn "Shutting down..."
     for pid in "${PIDS[@]}"; do
         kill "$pid" 2>/dev/null || true
     done
-    info "All processes stopped. Goodbye!"
+    info "All services stopped."
     exit 0
 }
 trap cleanup SIGINT SIGTERM
 
-# ── Start realtime detector in background ─────────────────────────────────────
-head "Starting Real-Time LiDAR Detector"
+# Step 6: Start Server
+head "Starting Application"
 
-if [ -e "$LIDAR_PORT" ]; then
-    info "LiDAR found at $LIDAR_PORT"
-    export CUDA_VISIBLE_DEVICES=-1
-    cd "$PROJECT_DIR/DL_Model"
-    "$PY" realtime_detector.py \
-        --port "$LIDAR_PORT" \
-        --baud 115200 \
-        --no-plot \
-        2>&1 | sed "s/^/  ${Y}[LiDAR]${X} /" &
-    PIDS+=($!)
-    info "Realtime detector running (PID $!)  — logs prefixed [LiDAR]"
-else
-    warn "LiDAR port $LIDAR_PORT not found — skipping realtime detector."
-    warn "(Connect TF02-Pro and restart, or set: export LIDAR_PORT=/dev/ttyUSB1)"
-fi
-
-# ── Start Streamlit dashboard ─────────────────────────────────────────────────
-head "Starting Dashboard"
-
-sleep 1   # brief pause so detector logs settle before streamlit output
-cd "$DASH_CWD"
+HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
 
 echo ""
-echo -e "  ${G}${B}Dashboard will be available at:${X}"
-echo -e "  ${C}${B}  ➜  http://${PI_IP}:${DASH_PORT}${X}   (network)"
-echo -e "  ${C}${B}  ➜  http://localhost:${DASH_PORT}${X}  (local)"
+echo -e "  ${G}${B}Application is available at:${X}"
+echo -e "  ${C}${B}  > http://${HOST_IP}:${PORT}${X}  (Network)"
+echo -e "  ${C}${B}  > http://localhost:${PORT}${X} (Local)"
 echo ""
-echo -e "  ${Y}Press  Ctrl+C  to stop everything.${X}"
+echo -e "  ${Y}Press Ctrl+C to stop.${X}"
 echo ""
 
-export CUDA_VISIBLE_DEVICES=-1
-"$ST" run "$DASH_SCRIPT" \
-    --server.port="$DASH_PORT" \
-    --server.address=0.0.0.0 \
-    --server.headless=true \
-    --server.enableCORS=false \
-    --server.enableXsrfProtection=false \
-    --browser.gatherUsageStats=false &
+cd "$PROJECT_DIR"
+"$PY" server.py &
 PIDS+=($!)
 
-# ── Wait (keep terminal alive, Ctrl+C triggers cleanup) ───────────────────────
+if [ "$DEV_MODE" = true ]; then
+    info "Starting Vite dev server on port 3000..."
+    cd "$PROJECT_DIR/frontend"
+    npm run dev &
+    PIDS+=($!)
+    cd "$PROJECT_DIR"
+fi
+
 wait
