@@ -163,7 +163,7 @@ class SystemManager:
         self.is_simulated = False
         self.status = "disconnected"  # "disconnected", "connecting", "connected", "error"
         self.status_message = "Sensor not connected"
-        self.port = "COM3"
+        self.port = "auto"
         self.baudrate = 115200
         self.send_init = True
 
@@ -372,8 +372,18 @@ class SystemManager:
                     return {"success": False, "message": self.status_message}
 
             try:
+                actual_port = self.port
+                if actual_port == "auto":
+                    from lidar_driver import auto_detect_lidar
+                    logger.info("Auto-detecting LiDAR port...")
+                    detected_port = auto_detect_lidar(baudrate=self.baudrate, send_init=self.send_init)
+                    if not detected_port:
+                        raise ValueError("Auto-detect failed: LiDAR not found on any port")
+                    actual_port = detected_port
+                    self.port = actual_port
+                
                 self.lidar = TF02Pro(
-                    port=self.port,
+                    port=actual_port,
                     baudrate=self.baudrate,
                     send_init=self.send_init,
                     timeout=0.20,

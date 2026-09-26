@@ -3,10 +3,17 @@ test_lidar.py — TF02-Pro hardware test. Clean version.
 Usage: python test_lidar.py [port] [baud]
 """
 import sys, time, logging
-from lidar_driver import TF02Pro, LiDARReadError
+from lidar_driver import TF02Pro, LiDARReadError, auto_detect_lidar
 
-PORT = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyUSB0"
+PORT = sys.argv[1] if len(sys.argv) > 1 else "auto"
 BAUD = int(sys.argv[2]) if len(sys.argv) > 2 else 115200
+
+if PORT == "auto":
+    print("Auto-detecting LiDAR port by scanning USB COM ports...")
+    PORT = auto_detect_lidar(baudrate=BAUD)
+    if not PORT:
+        print("Failed to auto-detect LiDAR. Exiting.")
+        sys.exit(1)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s: %(message)s")

@@ -270,3 +270,29 @@ class LiDARReaderThread:
 
 def list_ports():
     return [p.device for p in serial.tools.list_ports.comports()]
+
+def auto_detect_lidar(baudrate=115200, timeout=0.20, send_init=True):
+    """
+    Scans all available COM ports and tries to connect to the LiDAR.
+    Returns the port name if successful, else None.
+    """
+    logger.info("Scanning USB COM ports for LiDAR...")
+    ports = list_ports()
+    for port in ports:
+        logger.info(f"Checking {port}...")
+        lidar = None
+        try:
+            lidar = TF02Pro(port=port, baudrate=baudrate, timeout=timeout, send_init=send_init)
+            frame = lidar.read_frame()
+            if frame and "distance_cm" in frame:
+                logger.info(f"LiDAR found on {port}")
+                lidar.close()
+                return port
+        except Exception as e:
+            logger.debug(f"LiDAR not found on {port}: {e}")
+        finally:
+            if lidar is not None and lidar.connected:
+                lidar.close()
+    
+    logger.error("LiDAR not found on any available port.")
+    return None
