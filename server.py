@@ -108,24 +108,7 @@ class SimulatedLiDARReader:
 
     def _run(self):
         while self._running:
-            # Random road anomalies generator
-            if self._anomaly_type is None and random.random() < 0.02:
-                # 70% chance pothole, 30% chance bump
-                if random.random() < 0.70:
-                    self._anomaly_type = "pothole"
-                    self._anomaly_depth = random.choice([5.0, 7.5, 11.0, 14.0])
-                else:
-                    self._anomaly_type = "bump"
-                    self._anomaly_depth = -random.choice([4.5, 6.0, 8.5])
-                self._anomaly_duration = random.randint(10, 25)
-                self._anomaly_counter = 0
-
             offset = 0.0
-            if self._anomaly_type is not None:
-                offset = self._anomaly_depth
-                self._anomaly_counter += 1
-                if self._anomaly_counter >= self._anomaly_duration:
-                    self._anomaly_type = None
 
             noise = np.random.normal(0, 1.2)
             dist = round(float(self.base_distance + offset + noise), 1)
