@@ -18,6 +18,7 @@ export default function RoadSimulation2D({
   resetTrigger,
   onResetSimulation,
   onSimulatedAnomaly,
+  onSpeedChange,
 }) {
   const canvasRef = useRef(null);
 
@@ -92,12 +93,14 @@ export default function RoadSimulation2D({
     });
   }, []);
 
-  // Fallback to generator mode if hardware disconnects
+  // Automatically switch mode based on hardware availability
   useEffect(() => {
-    if (!isHardwareAvailable && simMode === "hardware") {
+    if (isHardwareAvailable) {
+      setSimMode("hardware");
+    } else {
       setSimMode("generator");
     }
-  }, [isHardwareAvailable, simMode]);
+  }, [isHardwareAvailable]);
 
   // Live HUD telemetry
   const [hudStats, setHudStats] = useState({
@@ -282,7 +285,11 @@ export default function RoadSimulation2D({
       if (e.key === "w" || e.key === "W" || e.code === "ArrowUp") {
         if (!e.ctrlKey && !e.metaKey) {
           e.preventDefault();
-          setSimSpeedKmph((prev) => Math.min(80, prev + 5));
+          setSimSpeedKmph((prev) => {
+            const nextSpeed = Math.min(80, prev + 5);
+            if (onSpeedChange) onSpeedChange(nextSpeed);
+            return nextSpeed;
+          });
           return;
         }
       }
@@ -291,7 +298,11 @@ export default function RoadSimulation2D({
       if (e.key === "s" || e.key === "S" || e.code === "ArrowDown") {
         if (!e.ctrlKey && !e.metaKey) {
           e.preventDefault();
-          setSimSpeedKmph((prev) => Math.max(10, prev - 5));
+          setSimSpeedKmph((prev) => {
+            const nextSpeed = Math.max(10, prev - 5);
+            if (onSpeedChange) onSpeedChange(nextSpeed);
+            return nextSpeed;
+          });
           return;
         }
       }
@@ -1867,6 +1878,12 @@ export default function RoadSimulation2D({
             step="5"
             value={simSpeedKmph}
             onChange={(e) => setSimSpeedKmph(Number(e.target.value))}
+            onMouseUp={(e) => {
+              if (onSpeedChange) onSpeedChange(Number(e.target.value));
+            }}
+            onTouchEnd={(e) => {
+              if (onSpeedChange) onSpeedChange(Number(e.target.value));
+            }}
             className="w-24 accent-white cursor-pointer h-1.5"
           />
           <span className="font-bold text-white w-10">{simSpeedKmph} km/h</span>

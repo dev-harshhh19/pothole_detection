@@ -453,6 +453,7 @@ export default function App() {
               resetTrigger={resetTrigger}
               onResetSimulation={handleResetMetrics}
               onSimulatedAnomaly={handleSimulatedAnomaly}
+              onSpeedChange={(speed) => handleSaveSettings({ ...settings, speed_kmph: speed })}
             />
           </>
         )}
