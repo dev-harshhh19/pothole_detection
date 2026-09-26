@@ -121,7 +121,8 @@ export default function RoadSimulation2D({
   const anomaliesRef = useRef([]);
 
   // Rolling terrain elevation buffer for hardware mode
-  const hardwareTerrainBufferRef = useRef(new Array(160).fill(0));
+  // Stores objects: { worldX, devCm }
+  const hardwareTerrainBufferRef = useRef([]);
 
   // Vehicle suspension dynamics
   const vehicleStateRef = useRef({
@@ -140,8 +141,19 @@ export default function RoadSimulation2D({
   useEffect(() => {
     if (simMode === "hardware" && isHardwareAvailable && telemetry) {
       const dev = telemetry.deviation_cm || 0;
-      hardwareTerrainBufferRef.current.push(dev);
-      if (hardwareTerrainBufferRef.current.length > 160) {
+      const canvas = canvasRef.current;
+      const width = canvas ? canvas.width / (window.devicePixelRatio || 1) : 1000;
+      
+      // The sensor is looking ahead. Let's map the new reading to the right edge of the screen.
+      const spawnWorldX = distanceTraveledRef.current + width;
+      
+      hardwareTerrainBufferRef.current.push({
+        worldX: spawnWorldX,
+        devCm: dev
+      });
+
+      // Keep buffer clean for performance (keep last 300 points)
+      if (hardwareTerrainBufferRef.current.length > 300) {
         hardwareTerrainBufferRef.current.shift();
       }
     }
@@ -396,11 +408,16 @@ export default function RoadSimulation2D({
         if (simMode === "hardware") {
           const buf = hardwareTerrainBufferRef.current;
           if (buf.length > 0) {
-            // Newest data (buf.length - 1) on the right (screenX = width), oldest (0) on the left (screenX = 0)
-            const idx = Math.floor((screenX / width) * (buf.length - 1));
-            const clampedIdx = Math.max(0, Math.min(buf.length - 1, idx));
-            const devCm = buf[clampedIdx] || 0;
-            return devCm * pixelsPerCm;
+            // Find the closest buffered reading to this worldX
+            // Buffer is sorted by worldX ascending
+            let matchDev = buf[buf.length - 1].devCm; // Default to newest if we're ahead of buffer
+            for (let i = 0; i < buf.length; i++) {
+              if (buf[i].worldX >= worldX) {
+                matchDev = buf[i].devCm;
+                break;
+              }
+            }
+            return matchDev * pixelsPerCm;
           }
           return 0;
         }
