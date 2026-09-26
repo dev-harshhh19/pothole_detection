@@ -29,7 +29,7 @@ export default function RoadSimulation2D({
   const [simMode, setSimMode] = useState("generator");
   const [isRunning, setIsRunning] = useState(true);
   const [simSpeedKmph, setSimSpeedKmph] = useState(30);
-  const [autoSpawn, setAutoSpawn] = useState(true);
+  const [autoSpawn, setAutoSpawn] = useState(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
 
   // Adjustable sensor mounting angle (degrees from horizontal pointing forward-downward, min 25 deg, max 50 deg)
@@ -125,11 +125,7 @@ export default function RoadSimulation2D({
   const detectedCountRef = useRef(0);
 
   // Road terrain anomalies queue
-  const anomaliesRef = useRef([
-    { id: 1, worldX: 750, type: "pothole", depthCm: 6.2, widthCm: 45, detected: false },
-    { id: 2, worldX: 1400, type: "deep_pothole", depthCm: 12.0, widthCm: 65, detected: false },
-    { id: 3, worldX: 2100, type: "bump", depthCm: -5.8, widthCm: 50, detected: false },
-  ]);
+  const anomaliesRef = useRef([]);
 
   // Rolling terrain elevation buffer for hardware mode
   const hardwareTerrainBufferRef = useRef(new Array(160).fill(0));
