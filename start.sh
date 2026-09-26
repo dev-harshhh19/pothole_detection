@@ -170,7 +170,29 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-# Step 6: Start Server
+# Step 6: Detect LiDAR Hardware
+head "Detecting LiDAR Hardware"
+echo "Scanning for LiDAR on USB COM ports..."
+DETECTED_PORT=$("$PY" -c "
+import sys
+try:
+    from lidar_driver import auto_detect_lidar
+    port = auto_detect_lidar(send_init=False)
+    if port:
+        print(port)
+    else:
+        print('NONE')
+except Exception as e:
+    print('NONE')
+")
+
+if [[ "$DETECTED_PORT" != "NONE" ]] && [[ -n "$DETECTED_PORT" ]]; then
+    info "LiDAR successfully detected on: $DETECTED_PORT"
+else
+    warn "LiDAR not found. Ensure it is plugged in and drivers are installed."
+fi
+
+# Step 7: Start Server
 head "Starting Application"
 
 HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
