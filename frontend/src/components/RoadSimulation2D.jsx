@@ -396,7 +396,8 @@ export default function RoadSimulation2D({
         if (simMode === "hardware") {
           const buf = hardwareTerrainBufferRef.current;
           if (buf.length > 0) {
-            const idx = Math.floor(((width - screenX) / width) * (buf.length - 1));
+            // Newest data (buf.length - 1) on the right (screenX = width), oldest (0) on the left (screenX = 0)
+            const idx = Math.floor((screenX / width) * (buf.length - 1));
             const clampedIdx = Math.max(0, Math.min(buf.length - 1, idx));
             const devCm = buf[clampedIdx] || 0;
             return devCm * pixelsPerCm;
