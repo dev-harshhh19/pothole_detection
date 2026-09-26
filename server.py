@@ -9,7 +9,6 @@ and hardware diagnostics for the React frontend.
 import asyncio
 import json
 import logging
-import random
 import threading
 import time
 from pathlib import Path
@@ -92,7 +91,10 @@ ml_model = load_ml_model()
 
 # Simulated Sensor Reader
 class SimulatedLiDARReader:
-    """Simulates 100 Hz TF02-Pro frames for offline testing."""
+    """Emits a perfectly flat 100 Hz signal for offline testing.
+    No noise, no random anomalies — all values are fixed constants.
+    Only real hardware data will produce detections.
+    """
     def __init__(self, base_distance: float = 1000.0):
         self.base_distance = base_distance
         self.frames = 0
@@ -100,32 +102,21 @@ class SimulatedLiDARReader:
         self._running = True
         self._latest = None
         self._lock = threading.Lock()
-        self._anomaly_counter = 0
-        self._anomaly_type = None  # None, "pothole", "bump"
-        self._anomaly_duration = 0
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def _run(self):
         while self._running:
-            offset = 0.0
-
-            noise = np.random.normal(0, 1.2)
-            dist = round(float(self.base_distance + offset + noise), 1)
-            dist = max(10.0, dist)
-
             frame = {
-                "distance_cm": dist,
-                "strength": int(random.randint(900, 1400)),
-                "temperature_c": round(29.0 + random.uniform(-0.5, 0.5), 1),
+                "distance_cm": round(self.base_distance, 1),
+                "strength": 1100,
+                "temperature_c": 29.0,
                 "valid": True,
                 "timestamp": time.time(),
             }
-
             with self._lock:
                 self._latest = frame
                 self.frames += 1
-
             time.sleep(0.01)  # 100 Hz
 
     def get_latest(self):
