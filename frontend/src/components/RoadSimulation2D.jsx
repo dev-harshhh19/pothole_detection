@@ -25,11 +25,11 @@ export default function RoadSimulation2D({
   // Hardware sync availability: only permitted when real physical sensor is detected
   const isHardwareAvailable = Boolean(connected && !isSimulated);
 
-  // Simulation mode: "generator" (autonomous procedural road) or "hardware" (synced to live LiDAR)
-  const [simMode, setSimMode] = useState("generator");
+  // Simulation always uses hardware mode (real LiDAR data)
+  const simMode = "hardware";
   const [isRunning, setIsRunning] = useState(true);
   const [simSpeedKmph, setSimSpeedKmph] = useState(30);
-  const [autoSpawn, setAutoSpawn] = useState(false);
+  const autoSpawn = false;
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
 
   // Adjustable sensor mounting angle (degrees from horizontal pointing forward-downward, min 25 deg, max 50 deg)
@@ -93,14 +93,7 @@ export default function RoadSimulation2D({
     });
   }, []);
 
-  // Automatically switch mode based on hardware availability
-  useEffect(() => {
-    if (isHardwareAvailable) {
-      setSimMode("hardware");
-    } else {
-      setSimMode("generator");
-    }
-  }, [isHardwareAvailable]);
+  // Simulation always runs in hardware mode — only real LiDAR data is used
 
   // Live HUD telemetry
   const [hudStats, setHudStats] = useState({
@@ -380,23 +373,6 @@ export default function RoadSimulation2D({
         distanceTraveledRef.current += dx;
         vehicleStateRef.current.wheelRot += (dx / 18) % (Math.PI * 2);
 
-        // Procedural road generator: spawn random potholes periodically
-        if (simMode === "generator" && autoSpawn) {
-          const spawnIntervalPx = 700;
-          const lastAnomaly = anomaliesRef.current[anomaliesRef.current.length - 1];
-          const nextSpawnThreshold = lastAnomaly
-            ? lastAnomaly.worldX + spawnIntervalPx + Math.random() * 450
-            : distanceTraveledRef.current + width + 200;
-
-          if (distanceTraveledRef.current + width + 100 > nextSpawnThreshold) {
-            const rand = Math.random();
-            let newType = "pothole";
-            if (rand < 0.45) newType = "pothole";
-            else if (rand < 0.80) newType = "deep_pothole";
-            else newType = "bump";
-            spawnAnomaly(newType);
-          }
-        }
       }
 
       // Cleanup anomalies that scrolled off-screen to the left
@@ -428,33 +404,8 @@ export default function RoadSimulation2D({
           return 0;
         }
 
-        // Procedural baseline micro-elevation based on road preset
-        let baselineTexturePx = 0;
-        if (roadPreset === "dirt") {
-          // Gravel washboard ridges and micro-chatter (max ~1.5cm elevation)
-          baselineTexturePx = (Math.sin(worldX * 0.05) * 0.5 + Math.sin(worldX * 0.012) * 1.0) * pixelsPerCm;
-        } else if (roadPreset === "mud") {
-          // Rolling mud ruts and soft clay waves (max ~2.7cm elevation)
-          baselineTexturePx = (Math.sin(worldX * 0.015) * 1.5 + Math.cos(worldX * 0.007) * 1.2) * pixelsPerCm;
-        } else if (roadPreset === "cobble") {
-          // Paver camber and joint seams (max ~1.0cm elevation)
-          baselineTexturePx = (Math.sin(worldX * 0.10) * 0.4 + Math.cos(worldX * 0.02) * 0.6) * pixelsPerCm;
-        }
-
-        // Generator mode: smooth cosine depression
-        let totalElevationPx = baselineTexturePx;
-        for (const anom of anomaliesRef.current) {
-          const distToCenter = worldX - anom.worldX;
-          const halfWidthPx = (anom.widthCm * pixelsPerCm) / 2;
-
-          if (Math.abs(distToCenter) < halfWidthPx) {
-            const normDist = distToCenter / halfWidthPx;
-            const factor = Math.cos(normDist * (Math.PI / 2));
-            const anomalyDepthPx = anom.depthCm * pixelsPerCm;
-            totalElevationPx += anomalyDepthPx * factor;
-          }
-        }
-        return totalElevationPx;
+        // No fake terrain — return flat road
+        return 0;
       };
 
       // -------------------------------------------------------------
@@ -1351,71 +1302,8 @@ export default function RoadSimulation2D({
         else activeClass = "Speed Bump";
       }
 
-      // Flag oncoming anomaly in generator mode
-      if (simMode === "generator") {
-        for (const anom of anomaliesRef.current) {
-          const worldHitX = distanceTraveledRef.current + hitX;
-          const halfWidthPx = (anom.widthCm * pixelsPerCm) / 2;
-          if (Math.abs(worldHitX - anom.worldX) < halfWidthPx) {
-            if (!anom.detected) {
-              anom.detected = true;
-              detectedCountRef.current += 1;
-
-              const isDeepAnom = anom.type === "deep_pothole";
-              const isPotholeAnom = anom.type === "pothole";
-              let detectedTypeName = "Speed Bump";
-              if (isDeepAnom) {
-                detectedTypeName =
-                  roadPreset === "mud"
-                    ? "Deep Mud Rut"
-                    : roadPreset === "dirt"
-                    ? "Severe Washout"
-                    : roadPreset === "cobble"
-                    ? "Sunken Paver Pit"
-                    : "Deep Pothole";
-              } else if (isPotholeAnom) {
-                detectedTypeName =
-                  roadPreset === "mud"
-                    ? "Mud Pothole"
-                    : roadPreset === "dirt"
-                    ? "Gravel Depression"
-                    : roadPreset === "cobble"
-                    ? "Loose Paver Hole"
-                    : "Shallow Pothole";
-              } else {
-                detectedTypeName =
-                  roadPreset === "mud"
-                    ? "Mud Ridge"
-                    : roadPreset === "dirt"
-                    ? "Gravel Mound"
-                    : roadPreset === "cobble"
-                    ? "Raised Paver Stone"
-                    : "Speed Bump";
-              }
-
-              const detectedObj = {
-                id: Date.now(),
-                time: new Date().toLocaleTimeString(),
-                type: detectedTypeName,
-                deviation_cm: `${anom.depthCm > 0 ? "+" : ""}${anom.depthCm.toFixed(1)}`,
-                depth_cm: Math.abs(anom.depthCm),
-                length_cm: anom.widthCm,
-                width_cm: Math.round(anom.widthCm * 0.8),
-                severity: Math.abs(anom.depthCm) >= 8.0 ? "Critical" : "Moderate",
-                confidence: "98%",
-                slant_range_cm: Math.round(measuredSlantCm * 10) / 10,
-                angle_deg: Number(sensorAngleDeg.toFixed(2)),
-              };
-
-              setSessionDetections((prev) => [detectedObj, ...prev.slice(0, 19)]);
-
-              if (onSimulatedAnomaly) {
-                onSimulatedAnomaly(detectedObj);
-              }
-            }
-          }
-        }
-      }
+      // Hardware mode: detect anomalies from real LiDAR deviation in telemetry
+      // Detections are driven entirely by the backend classification — no fake logic here.
 
       // Draw Laser Beam in Red-Amber Mixed Color (Shooting down-right ahead of bike)
       ctx.save();
