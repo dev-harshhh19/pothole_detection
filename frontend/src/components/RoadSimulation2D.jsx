@@ -537,13 +537,11 @@ export default function RoadSimulation2D({
       ctx.setLineDash([]);
 
       // 3. MOTORBIKE POSITION & SUSPENSION DYNAMICS
-      // Bike placed on left side facing forward to the right
-      const bikeScreenX = Math.max(80, width * 0.15);
-      const wheelbasePx = 75; // Wheelbase ~1.4 meters in scale
-      const wheelRadius = 14;
-
-      const rearAxleX = bikeScreenX - wheelbasePx * 0.5;
-      const frontAxleX = bikeScreenX + wheelbasePx * 0.5;
+      // Bike placed on left side facing forward to the right (Wheelbase 110px, wheel radius 18px)
+      const bikeScreenX = Math.max(90, width * 0.15);
+      const wheelRadius = 18;
+      const rearAxleX = bikeScreenX - 55;
+      const frontAxleX = bikeScreenX + 55;
 
       const rearGroundY = baselineY + getTerrainElevationAtScreenX(rearAxleX);
       const frontGroundY = baselineY + getTerrainElevationAtScreenX(frontAxleX);
@@ -559,120 +557,280 @@ export default function RoadSimulation2D({
       const chassisMidX = (rearAxleX + frontAxleX) / 2;
       const chassisMidY = (rearAxleY + frontAxleY) / 2;
 
-      // Draw Wheels
-      const drawWheel = (axleX, axleY) => {
+      // Draw Detailed Motorbike Wheel (Procedural Alloy + Treads + Brake Caliper)
+      const drawMotorbikeWheel = (wx, wy) => {
         ctx.save();
-        ctx.translate(axleX, axleY);
+        ctx.translate(wx, wy);
         ctx.rotate(vehicleStateRef.current.wheelRot);
 
-        // Tire rim
-        ctx.strokeStyle = "#e4e4e7";
-        ctx.lineWidth = 3;
+        // Outer Tire Rim
         ctx.beginPath();
         ctx.arc(0, 0, wheelRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2.2;
         ctx.stroke();
 
-        // Hub
-        ctx.fillStyle = "#f97316";
+        // Inner Rim Circle
         ctx.beginPath();
-        ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Spokes
+        ctx.arc(0, 0, wheelRadius - 4.5, 0, Math.PI * 2);
         ctx.strokeStyle = "#71717a";
         ctx.lineWidth = 1;
-        for (let a = 0; a < Math.PI * 2; a += Math.PI / 3) {
+        ctx.stroke();
+
+        // 16 Tire Tread Teeth along outer circumference
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.2;
+        const numTreads = 16;
+        for (let i = 0; i < numTreads; i++) {
+          const a = (i * 2 * Math.PI) / numTreads;
+          const r1 = wheelRadius - 2;
+          const r2 = wheelRadius + 1.5;
           ctx.beginPath();
-          ctx.moveTo(0, 0);
-          ctx.lineTo(Math.cos(a) * wheelRadius, Math.sin(a) * wheelRadius);
+          ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+          ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
           ctx.stroke();
         }
+
+        // 6-Spoke Alloy Wheel Pattern
+        ctx.strokeStyle = "#e4e4e7";
+        ctx.lineWidth = 1.5;
+        const numSpokes = 6;
+        for (let i = 0; i < numSpokes; i++) {
+          const a = (i * 2 * Math.PI) / numSpokes;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(a) * (wheelRadius - 4.5), Math.sin(a) * (wheelRadius - 4.5));
+          ctx.stroke();
+        }
+
+        // Disc Brake Caliper
+        ctx.beginPath();
+        ctx.arc(0, 0, wheelRadius - 8, 0, Math.PI * 2);
+        ctx.strokeStyle = "#52525b";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Center Axle Hub
+        ctx.beginPath();
+        ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+
         ctx.restore();
       };
 
-      drawWheel(rearAxleX, rearAxleY);
-      drawWheel(frontAxleX, frontAxleY);
+      drawMotorbikeWheel(rearAxleX, rearAxleY);
+      drawMotorbikeWheel(frontAxleX, frontAxleY);
 
       // 4. DRAW MOTORBIKE CHASSIS & FRONT-MOUNTED TF02-PRO SENSOR
       ctx.save();
       ctx.translate(chassisMidX, chassisMidY);
       ctx.rotate(pitch);
 
-      // Main frame tube
       ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.moveTo(-35, 12); // Rear axle
-      ctx.lineTo(-10, -8);  // Engine base
-      ctx.lineTo(25, -16);  // Steering head
-      ctx.lineTo(37, 12);   // Front axle
-      ctx.stroke();
+      ctx.lineWidth = 1.8;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
 
-      // Fuel Tank & Seat
-      ctx.fillStyle = "#18181b";
+      // 1. Rear Swingarm (from pivot at -18,2 back to rear axle at -55,12)
       ctx.beginPath();
-      ctx.moveTo(-25, -14); // Rear seat
-      ctx.lineTo(-5, -16);  // Rider seat
-      ctx.lineTo(10, -26);  // Tank crest
-      ctx.lineTo(24, -18);  // Tank front
-      ctx.lineTo(5, -6);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      // Front Headlight Cowl & Brow
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(25, -18);
-      ctx.lineTo(44, -20);
-      ctx.lineTo(44, -10);
-      ctx.lineTo(30, -8);
+      ctx.moveTo(-18, 2);
+      ctx.lineTo(-55, 12);
+      ctx.lineTo(-55, 6);
+      ctx.lineTo(-18, -2);
       ctx.closePath();
       ctx.stroke();
 
-      // Headlight glow
-      ctx.strokeStyle = "#fef08a";
+      // Rear Monoshock Suspension Coil Spring
+      ctx.strokeStyle = "#d4d4d8";
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(44, -20);
-      ctx.lineTo(44, -10);
+      ctx.moveTo(-32, 6);
+      ctx.lineTo(-14, -14);
       ctx.stroke();
 
-      // Sensor Platform (Mounted above headlight)
+      // 2. Engine Block & Transmission (Center)
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.moveTo(25, -20);
-      ctx.lineTo(38, -28);
-      ctx.lineTo(47, -28);
+      ctx.moveTo(-18, -4);
+      ctx.lineTo(16, -4);
+      ctx.lineTo(16, 12);
+      ctx.lineTo(-18, 12);
+      ctx.closePath();
       ctx.stroke();
 
-      // TF02-Pro LiDAR Casing (Fixed 5m orientation)
+      // Engine Cylinder Cooling Fins
+      ctx.beginPath();
+      ctx.moveTo(-12, 0);
+      ctx.lineTo(10, 0);
+      ctx.moveTo(-12, 4);
+      ctx.lineTo(10, 4);
+      ctx.moveTo(-12, 8);
+      ctx.lineTo(10, 8);
+      ctx.stroke();
+
+      // 3. Compact Upswept Exhaust System (Exhaust pipe to rear left)
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(12, 4);
+      ctx.lineTo(4, 15);
+      ctx.lineTo(-16, 15);
+      ctx.lineTo(-46, 6); // Upswept muffler
+      ctx.lineTo(-58, 4);
+      ctx.stroke();
+
+      // Muffler Heat Shield
+      ctx.strokeStyle = "#a1a1aa";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-22, 12);
+      ctx.lineTo(-48, 6);
+      ctx.stroke();
+
+      // 4. Trellis Frame & Footpeg
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-18, 2);
+      ctx.lineTo(12, -22); // Diagonal brace
+      ctx.moveTo(0, 12);
+      ctx.lineTo(34, -28); // Lower spar to headstock
+      ctx.stroke();
+
+      // Rider Footpeg
+      ctx.beginPath();
+      ctx.moveTo(-8, 12);
+      ctx.lineTo(-8, 18);
+      ctx.lineTo(-2, 18);
+      ctx.stroke();
+
+      // 5. Sculpted Fuel Tank (Facing Right)
+      ctx.beginPath();
+      ctx.moveTo(34, -28); // Headstock joint
+      ctx.lineTo(10, -34); // Tank peak
+      ctx.lineTo(-8, -20); // Tank rear / seat junction
+      ctx.lineTo(4, -14);  // Knee recess lower edge
+      ctx.closePath();
+      ctx.stroke();
+
+      // 6. Stepped Sport Rider & Pillion Seat
+      ctx.beginPath();
+      ctx.moveTo(-8, -20); // Front seat nose
+      ctx.lineTo(-30, -20); // Rider saddle dip
+      ctx.lineTo(-38, -28); // Pillion step rise
+      ctx.lineTo(-58, -28); // Tail end
+      ctx.lineTo(-52, -18); // Lower undertray
+      ctx.lineTo(-8, -16);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Rear Tail Light & License Tidy (Facing Left)
+      ctx.strokeStyle = "#ef4444"; // Red tail marker
+      ctx.beginPath();
+      ctx.moveTo(-58, -28);
+      ctx.lineTo(-64, -26);
+      ctx.lineTo(-58, -22);
+      ctx.stroke();
+
+      // 7. Front Telescopic Fork Assembly (Angling down-right to front axle)
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(34, -28); // Triple clamp
+      ctx.lineTo(55, 12);  // Front axle
+      ctx.stroke();
+
+      // Front Mudguard / Fender
+      ctx.beginPath();
+      ctx.arc(55, 12, wheelRadius + 4, -Math.PI * 0.75, -Math.PI * 0.15);
+      ctx.stroke();
+
+      // 8. Handlebars with Levers & Rear-View Mirror
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(34, -28);
+      ctx.lineTo(32, -42); // Handlebar riser
+      ctx.lineTo(26, -44); // Grip
+      ctx.lineTo(32, -44); // Brake lever
+      ctx.stroke();
+
+      // Mirror stalk angling up-back
+      ctx.beginPath();
+      ctx.moveTo(32, -42);
+      ctx.lineTo(26, -54);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(24, -56, 3, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 9. Aerodynamic Front Headlight Fairing / Cowl (Facing Right)
+      ctx.beginPath();
+      ctx.moveTo(34, -28);
+      ctx.lineTo(48, -26); // Headlight nose
+      ctx.lineTo(48, -18);
+      ctx.lineTo(36, -14);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Headlight Lens (Facing Forward to the Right)
+      ctx.strokeStyle = "#fef08a";
+      ctx.beginPath();
+      ctx.moveTo(48, -26);
+      ctx.lineTo(48, -18);
+      ctx.stroke();
+
+      // Upper Cowl Brow & Sensor Mounting Shelf (Positioned ABOVE Headlights)
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(34, -28);
+      ctx.lineTo(42, -34); // Rising cowl brow line above headlight
+      ctx.lineTo(49, -34); // Sensor platform shelf
+      ctx.stroke();
+
+      // Strut bracket connecting cowl brow to headlight housing
+      ctx.strokeStyle = "#71717a";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(48, -34);
+      ctx.lineTo(48, -26);
+      ctx.stroke();
+
+      // 10. TF02-Pro LiDAR Sensor Unit (Mounted ABOVE headlights, facing forward-down to RIGHT)
       const sensorLocalX = 47;
-      const sensorLocalY = -28;
+      const sensorLocalY = -34;
 
       ctx.save();
       ctx.translate(sensorLocalX, sensorLocalY);
       ctx.rotate(FIXED_BEAM_ANGLE_RAD);
 
-      // Housing
-      ctx.fillStyle = "#09090b";
-      ctx.fillRect(-4, -4, 14, 8);
-      ctx.strokeStyle = "#f97316";
-      ctx.lineWidth = 1.4;
-      ctx.strokeRect(-4, -4, 14, 8);
-
-      // Red Laser Emitter Lens
-      ctx.fillStyle = "#ef4444";
+      // LiDAR Mounting Swivel Collar
+      ctx.strokeStyle = "#71717a";
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
-      ctx.arc(10, 0, 2.5, 0, Math.PI * 2);
+      ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // LiDAR Outer Casing
+      ctx.fillStyle = "#09090b";
+      ctx.fillRect(-4, -4, 12, 8);
+      ctx.strokeStyle = "#f97316"; // Fiery red-amber housing accent
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(-4, -4, 12, 8);
+
+      // Optical Emitter Lens (Facing right-down)
+      ctx.fillStyle = "#ef4444"; // Vivid red lens
+      ctx.beginPath();
+      ctx.arc(8, 0, 2.2, 0, Math.PI * 2);
       ctx.fill();
 
-      // Amber halo
+      // Lens amber glow halo
       ctx.strokeStyle = "#f59e0b";
       ctx.lineWidth = 0.8;
       ctx.beginPath();
-      ctx.arc(10, 0, 3.5, 0, Math.PI * 2);
+      ctx.arc(8, 0, 3.2, 0, Math.PI * 2);
       ctx.stroke();
 
       ctx.restore();
@@ -682,7 +840,7 @@ export default function RoadSimulation2D({
       const cosP = Math.cos(pitch);
       const sinP = Math.sin(pitch);
       const sensorLocalOffsetX = 47;
-      const sensorLocalOffsetY = -28;
+      const sensorLocalOffsetY = -34;
 
       const lidarOriginX = chassisMidX + sensorLocalOffsetX * cosP - sensorLocalOffsetY * sinP;
       const lidarOriginY = chassisMidY + sensorLocalOffsetX * sinP + sensorLocalOffsetY * cosP;
