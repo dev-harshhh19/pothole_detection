@@ -557,17 +557,41 @@ export default function RoadSimulation2D({
           baselineTexturePx = (Math.sin(worldX * 0.10) * 0.4 + Math.cos(worldX * 0.02) * 0.6) * pixelsPerCm;
         }
 
-        // Generator mode: smooth cosine depression/elevation
+        // Generator mode: realistic steep-walled crater / distinct speed bump profile
         let totalElevationPx = baselineTexturePx;
         for (const anom of anomaliesRef.current) {
           const distToCenter = worldX - anom.worldX;
           const halfWidthPx = (anom.widthCm * pixelsPerCm) / 2;
 
-          if (Math.abs(distToCenter) < halfWidthPx) {
-            const normDist = distToCenter / halfWidthPx;
-            const factor = Math.cos(normDist * (Math.PI / 2));
+          if (Math.abs(distToCenter) <= halfWidthPx) {
+            const normDist = Math.abs(distToCenter) / halfWidthPx; // 0 at center, 1.0 at outer rim
+            let profileFactor = 0;
+
+            if (anom.type === "pothole" || anom.type === "deep_pothole") {
+              // REALISTIC STEEP-WALLED ASPHALT CRATER (Sharp edge drop, not a gentle slope)
+              // Rim drop zone: outer 15% of crater width transitions steeply into cavity
+              if (normDist > 0.85) {
+                // Steep asphalt fracture wall drop (0 at rim edge to 0.92 at cavity wall)
+                const wallT = (1.0 - normDist) / 0.15; // 0.0 to 1.0
+                profileFactor = Math.pow(Math.sin(wallT * (Math.PI / 2)), 0.4);
+              } else {
+                // Interior crater cavity floor: flat/rough broken pavement with asphalt fracture noise
+                const cavityNoise =
+                  Math.sin(worldX * 0.4) * 0.06 + Math.cos(worldX * 0.85) * 0.04;
+                profileFactor = 1.0 + cavityNoise;
+              }
+            } else if (anom.type === "bump") {
+              // Defined trapezoidal / steep-edged speed hump
+              if (normDist > 0.75) {
+                const rampT = (1.0 - normDist) / 0.25;
+                profileFactor = Math.sin(rampT * (Math.PI / 2));
+              } else {
+                profileFactor = 1.0 - Math.pow(normDist / 0.75, 2) * 0.12;
+              }
+            }
+
             const anomalyDepthPx = anom.depthCm * pixelsPerCm;
-            totalElevationPx += anomalyDepthPx * factor;
+            totalElevationPx += anomalyDepthPx * profileFactor;
           }
         }
         return totalElevationPx;
@@ -610,8 +634,8 @@ export default function RoadSimulation2D({
         }
       }
 
-      // 2. DRAW ROAD TERRAIN CROSS-SECTION
-      const step = 4;
+      // 2. DRAW ROAD TERRAIN CROSS-SECTION (High-resolution step for crisp crater edges)
+      const step = 2; // 2px fine sampling ensures sharp vertical crater walls
       const surfacePoints = [];
       for (let sx = 0; sx <= width + step; sx += step) {
         const elev = getTerrainElevationAtScreenX(sx);
@@ -658,6 +682,42 @@ export default function RoadSimulation2D({
         ctx.lineTo(surfacePoints[i].x, surfacePoints[i].y);
       }
       ctx.stroke();
+
+      // Highlight crater cavity fracture markers and sharp rims
+      for (const anom of anomaliesRef.current) {
+        const screenCenterX = anom.worldX - distanceTraveledRef.current;
+        const halfWidthPx = (anom.widthCm * pixelsPerCm) / 2;
+        const leftRimX = screenCenterX - halfWidthPx;
+        const rightRimX = screenCenterX + halfWidthPx;
+
+        if (rightRimX >= 0 && leftRimX <= width) {
+          const isPotholeHazard = anom.type.includes("pothole");
+          const isDeepHazard = anom.type === "deep_pothole";
+
+          if (isPotholeHazard) {
+            // Draw red/amber sharp rim boundary ticks
+            ctx.strokeStyle = isDeepHazard ? "#ef4444" : "#f59e0b";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(leftRimX, baselineY - 4);
+            ctx.lineTo(leftRimX, baselineY + 4);
+            ctx.moveTo(rightRimX, baselineY - 4);
+            ctx.lineTo(rightRimX, baselineY + 4);
+            ctx.stroke();
+
+            // Cavity depth marker line
+            const cavityBottomY = baselineY + anom.depthCm * pixelsPerCm;
+            ctx.strokeStyle = isDeepHazard ? "rgba(239, 68, 68, 0.4)" : "rgba(245, 158, 11, 0.4)";
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.moveTo(leftRimX + 4, cavityBottomY);
+            ctx.lineTo(rightRimX - 4, cavityBottomY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+      }
 
       // Flat road nominal baseline reference (dashed yellow) with Base Value label
       ctx.strokeStyle = "rgba(234, 179, 8, 0.45)";
