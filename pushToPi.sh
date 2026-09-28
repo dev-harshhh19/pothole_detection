@@ -135,10 +135,10 @@ else
     scp "${SCP_OPTS[@]}" "$PROJECT_DIR/frontend/dist/"* "$PI_USER@$PI_HOST:$PI_DEST/frontend/dist/"
 fi
 
-# Set executable permissions on Pi
+# Set executable permissions and fix line endings on Pi
 head "4. Setting Permissions"
-ssh "${SSH_OPTS[@]}" "$PI_USER@$PI_HOST" "chmod +x $PI_DEST/start.sh"
-info "start.sh marked executable on Raspberry Pi."
+ssh "${SSH_OPTS[@]}" "$PI_USER@$PI_HOST" "sed -i 's/\r$//' $PI_DEST/*.sh 2>/dev/null || true && chmod +x $PI_DEST/*.sh"
+info "start.sh converted to Unix LF and marked executable on Raspberry Pi."
 
 # Post actions
 if [ "$ACTION" = "setup" ]; then
