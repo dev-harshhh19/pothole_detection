@@ -455,6 +455,11 @@ export default function App() {
               onResetSimulation={handleResetMetrics}
               onSimulatedAnomaly={handleSimulatedAnomaly}
               onSpeedChange={(speed) => handleSaveSettings({ ...settings, speed_kmph: speed })}
+              logs={logs}
+              onClearLog={handleClearLog}
+              potholeCount={potholeCount}
+              bumpCount={bumpCount}
+              lastDepth={lastDepth}
             />
           </>
         )}

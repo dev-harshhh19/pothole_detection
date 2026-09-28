@@ -1,15 +1,38 @@
-import React, { useRef, useEffect, useState, useCallback } from "react";
-import { Play, Pause, Plus, Bike, AlertTriangle, CheckCircle2, Lock, RefreshCw, Keyboard, X, Compass, Gauge, ShieldAlert, Activity } from "lucide-react";
+import React, { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import {
+  Play,
+  Pause,
+  Plus,
+  AlertTriangle,
+  CheckCircle2,
+  RefreshCw,
+  Keyboard,
+  X,
+  Compass,
+  Radio,
+  ArrowUpDown,
+  Zap,
+  Clock,
+  Gauge,
+  ListFilter,
+  Search,
+  Download,
+  Trash2,
+  Ruler,
+} from "lucide-react";
 
 /**
  * RoadSimulation2D
  * ================
- * Dedicated 2D simulation with realistic vehicle physics for a motorbike
- * driving forward (from left to right).
- * Features a front-mounted TF02-Pro LiDAR positioned above headlights
- * with a FIXED 5.0 METER (500 cm) distance ray from sensor to road.
- * Sensor readings register from right to left (oncoming road ahead -> front wheel -> rear wheel).
- * Displays rich multi-unit metrics: cm, meters, feet, inches, km/h, m/s, mph.
+ * High-precision 2D road & vehicle simulation for LiDAR Pothole Detection.
+ * 
+ * Features:
+ * - Fixed 5.0-meter (500 cm / 16.4 ft) LiDAR slant ray geometry.
+ * - Prominent display of the sensor's baseline / base value (auto-calibrated or nominal).
+ * - Full live Event Records & Anomaly Log table directly inside the simulation tab (synced with Dashboard).
+ * - Clean, accurate Economic Commuter Motorcycle blueprint (100-125cc commuter architecture with perfectly aligned wheels, swingarm, dual shocks, engine, chaincase, fuel tank, long seat, forks, and TF02-Pro sensor).
+ * - Multi-unit telemetry HUD (cm, m, ft, in, km/h, m/s, mph, ms).
+ * - Right-to-left data registration (oncoming road ahead -> front wheel -> chassis -> rear wheel).
  */
 export default function RoadSimulation2D({
   telemetry,
@@ -20,6 +43,11 @@ export default function RoadSimulation2D({
   onResetSimulation,
   onSimulatedAnomaly,
   onSpeedChange,
+  logs = [],
+  onClearLog,
+  potholeCount = 0,
+  bumpCount = 0,
+  lastDepth = 0,
 }) {
   const canvasRef = useRef(null);
 
@@ -32,6 +60,10 @@ export default function RoadSimulation2D({
   const [simSpeedKmph, setSimSpeedKmph] = useState(30);
   const [autoSpawn, setAutoSpawn] = useState(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+
+  // Filter state for the event records table
+  const [eventFilter, setEventFilter] = useState("ALL");
+  const [eventSearch, setEventSearch] = useState("");
 
   // Road surface presets: "asphalt" | "mud" | "dirt" | "cobble"
   const ROAD_PRESETS = [
@@ -78,6 +110,18 @@ export default function RoadSimulation2D({
     }
   }, [isHardwareAvailable]);
 
+  // Sensor Base Value calculation (auto-calibrated baseline or 500 cm nominal slant)
+  const baseValueCm = useMemo(() => {
+    if (isHardwareAvailable && telemetry && typeof telemetry.baseline_cm === "number" && telemetry.baseline_cm > 0) {
+      return telemetry.baseline_cm;
+    }
+    return 500.0; // Nominal 5.0m fixed beam baseline
+  }, [isHardwareAvailable, telemetry]);
+
+  const isCalibrated = Boolean(telemetry?.calibrated);
+  const warmupCount = telemetry?.warmup_count || 0;
+  const warmupTotal = telemetry?.warmup_total || 20;
+
   // Live Comprehensive HUD telemetry metrics (multi-unit)
   const [hudStats, setHudStats] = useState({
     speedKmph: 30,
@@ -86,6 +130,9 @@ export default function RoadSimulation2D({
     slantDistanceCm: 500.0,
     slantDistanceM: 5.0,
     slantDistanceFt: 16.4,
+    baseValueCm: 500.0,
+    baseValueM: 5.0,
+    baseValueFt: 16.4,
     verticalDepthCm: 85.0,
     verticalDepthM: 0.85,
     verticalDepthIn: 33.46,
@@ -100,10 +147,53 @@ export default function RoadSimulation2D({
     isAlert: false,
     severity: "None",
     detectedCount: 0,
+    activeHazard: null,
   });
 
-  // Recent detections log for this simulation run
+  // Local session detections fallback buffer
   const [sessionDetections, setSessionDetections] = useState([]);
+
+  // Combined event records list (merging logs prop and local session detections)
+  const combinedEventRecords = useMemo(() => {
+    const map = new Map();
+    // Prioritize passed logs from App / Backend
+    (logs || []).forEach((item) => {
+      if (item && item.id) map.set(item.id, item);
+    });
+    // Add local session detections if not present
+    sessionDetections.forEach((item) => {
+      if (item && item.id && !map.has(item.id)) map.set(item.id, item);
+    });
+    const combined = Array.from(map.values());
+    // Sort descending by id/timestamp
+    return combined.sort((a, b) => (b.id || 0) - (a.id || 0));
+  }, [logs, sessionDetections]);
+
+  // Filtered event records
+  const filteredEventRecords = useMemo(() => {
+    return combinedEventRecords.filter((item) => {
+      if (!item) return false;
+      const t = String(item.type || "").toLowerCase();
+      const timeStr = String(item.time || "").toLowerCase();
+      const sev = String(item.severity || "").toLowerCase();
+
+      const matchesFilter =
+        eventFilter === "ALL" ||
+        (eventFilter === "POTHOLE" && t.includes("pothole")) ||
+        (eventFilter === "DEEP" && t.includes("deep")) ||
+        (eventFilter === "BUMP" && t.includes("bump"));
+
+      const q = eventSearch.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        t.includes(q) ||
+        timeStr.includes(q) ||
+        sev.includes(q) ||
+        String(item.depth_cm || "").includes(q);
+
+      return matchesFilter && matchesSearch;
+    });
+  }, [combinedEventRecords, eventFilter, eventSearch]);
 
   // Animation and physics state refs
   const animFrameRef = useRef(null);
@@ -136,8 +226,6 @@ export default function RoadSimulation2D({
   }, [settings?.speed_kmph]);
 
   // Push incoming live hardware telemetry into terrain buffer
-  // Data is registered at the forward lookahead laser hit point (on the RIGHT)
-  // and flows toward the LEFT through the bike as distanceTraveled increases.
   useEffect(() => {
     if (simMode === "hardware" && isHardwareAvailable && telemetry) {
       const dev = typeof telemetry.deviation_cm === "number" ? telemetry.deviation_cm : 0;
@@ -145,8 +233,8 @@ export default function RoadSimulation2D({
       const width = canvas ? canvas.width / (window.devicePixelRatio || 1) : 1000;
 
       // Fixed 5-meter slant ray geometry
-      const bikeScreenX = Math.max(80, width * 0.15);
-      const lidarOriginX = bikeScreenX + 47;
+      const bikeScreenX = Math.max(90, width * 0.15);
+      const lidarOriginX = bikeScreenX + 44;
       const nominalLeadDistanceCm = 492.7; // 500cm hypotenuse with ~85cm height
       const pixelsPerCm = 1.2; // 120 px = 1 meter
       const hitScreenX = lidarOriginX + nominalLeadDistanceCm * pixelsPerCm;
@@ -225,6 +313,7 @@ export default function RoadSimulation2D({
       surfaceType: nominalSurface,
       isAlert: false,
       severity: "None",
+      activeHazard: null,
     }));
   }, [roadPreset]);
 
@@ -234,6 +323,50 @@ export default function RoadSimulation2D({
       handleReset();
     }
   }, [resetTrigger, handleReset]);
+
+  // Export event records to CSV
+  const exportCsv = () => {
+    if (!combinedEventRecords || combinedEventRecords.length === 0) return;
+    const headers = [
+      "Time",
+      "Type",
+      "Deviation (cm)",
+      "Depth (cm)",
+      "Length (cm)",
+      "Width (cm)",
+      "Slant Range (cm)",
+      "Lookahead Lead (m)",
+      "Severity",
+      "Confidence",
+      "Signal Strength",
+      "Baseline (cm)",
+    ];
+    const rows = combinedEventRecords.map((item) => [
+      item.time || "",
+      item.type || "",
+      item.deviation_cm || "",
+      item.depth_cm || 0,
+      item.length_cm || 0,
+      item.width_cm || 0,
+      item.slant_range_cm || item.slant_range || "",
+      item.lead_dist_m || "",
+      item.severity || "",
+      item.confidence || "",
+      item.strength || 0,
+      item.baseline || baseValueCm,
+    ]);
+
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `road_simulation_events_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   // Global Keyboard Shortcuts listener
   useEffect(() => {
@@ -526,18 +659,22 @@ export default function RoadSimulation2D({
       }
       ctx.stroke();
 
-      // Flat road nominal baseline reference (dashed yellow)
-      ctx.strokeStyle = "rgba(234, 179, 8, 0.4)";
+      // Flat road nominal baseline reference (dashed yellow) with Base Value label
+      ctx.strokeStyle = "rgba(234, 179, 8, 0.45)";
       ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
+      ctx.setLineDash([5, 5]);
       ctx.beginPath();
       ctx.moveTo(0, baselineY);
       ctx.lineTo(width, baselineY);
       ctx.stroke();
       ctx.setLineDash([]);
 
+      ctx.fillStyle = "rgba(234, 179, 8, 0.7)";
+      ctx.font = "bold 9px monospace";
+      ctx.fillText(`Nominal Ground Baseline (d₀ = ${baseValueCm.toFixed(1)} cm)`, 12, baselineY - 6);
+
       // 3. MOTORBIKE POSITION & SUSPENSION DYNAMICS
-      // Bike placed on left side facing forward to the right (Wheelbase 110px, wheel radius 18px)
+      // Economic Commuter Motorcycle geometry (Wheelbase: 110px, Wheel radius: 18px)
       const bikeScreenX = Math.max(90, width * 0.15);
       const wheelRadius = 18;
       const rearAxleX = bikeScreenX - 55;
@@ -557,44 +694,44 @@ export default function RoadSimulation2D({
       const chassisMidX = (rearAxleX + frontAxleX) / 2;
       const chassisMidY = (rearAxleY + frontAxleY) / 2;
 
-      // Draw Detailed Motorbike Wheel (Procedural Alloy + Treads + Brake Caliper)
-      const drawMotorbikeWheel = (wx, wy) => {
+      // Draw Detailed Commuter Wheel (5-Spoke Star Alloy + Radial Treads + Caliper + Center Hub)
+      const drawCommuterWheel = (wx, wy) => {
         ctx.save();
         ctx.translate(wx, wy);
         ctx.rotate(vehicleStateRef.current.wheelRot);
 
-        // Outer Tire Rim
+        // Outer Rubber Tire
         ctx.beginPath();
         ctx.arc(0, 0, wheelRadius, 0, Math.PI * 2);
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 2.2;
         ctx.stroke();
 
-        // Inner Rim Circle
+        // Inner Alloy Rim Circle
         ctx.beginPath();
         ctx.arc(0, 0, wheelRadius - 4.5, 0, Math.PI * 2);
-        ctx.strokeStyle = "#71717a";
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = "#a1a1aa";
+        ctx.lineWidth = 1.2;
         ctx.stroke();
 
-        // 16 Tire Tread Teeth along outer circumference
+        // 16 Tire Tread Grooves along circumference
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 1.2;
         const numTreads = 16;
         for (let i = 0; i < numTreads; i++) {
           const a = (i * 2 * Math.PI) / numTreads;
           const r1 = wheelRadius - 2;
-          const r2 = wheelRadius + 1.5;
+          const r2 = wheelRadius + 1.6;
           ctx.beginPath();
           ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
           ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
           ctx.stroke();
         }
 
-        // 6-Spoke Alloy Wheel Pattern
+        // 5-Spoke Commuter Alloy Pattern
         ctx.strokeStyle = "#e4e4e7";
-        ctx.lineWidth = 1.5;
-        const numSpokes = 6;
+        ctx.lineWidth = 1.6;
+        const numSpokes = 5;
         for (let i = 0; i < numSpokes; i++) {
           const a = (i * 2 * Math.PI) / numSpokes;
           ctx.beginPath();
@@ -603,14 +740,14 @@ export default function RoadSimulation2D({
           ctx.stroke();
         }
 
-        // Disc Brake Caliper
+        // Disc Rotor / Drum Rim Ring
         ctx.beginPath();
-        ctx.arc(0, 0, wheelRadius - 8, 0, Math.PI * 2);
+        ctx.arc(0, 0, wheelRadius - 8.5, 0, Math.PI * 2);
         ctx.strokeStyle = "#52525b";
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // Center Axle Hub
+        // Center Axle Hub Nut
         ctx.beginPath();
         ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
         ctx.fillStyle = "#ffffff";
@@ -619,10 +756,12 @@ export default function RoadSimulation2D({
         ctx.restore();
       };
 
-      drawMotorbikeWheel(rearAxleX, rearAxleY);
-      drawMotorbikeWheel(frontAxleX, frontAxleY);
+      drawCommuterWheel(rearAxleX, rearAxleY);
+      drawCommuterWheel(frontAxleX, frontAxleY);
 
-      // 4. DRAW MOTORBIKE CHASSIS & FRONT-MOUNTED TF02-PRO SENSOR
+      // 4. DRAW ECONOMIC COMMUTER MOTORCYCLE BLUEPRINT (100-125cc commuter architecture)
+      // All local coordinates relative to (chassisMidX, chassisMidY).
+      // Rear Axle is strictly at (-55, 0) and Front Axle is strictly at (55, 0).
       ctx.save();
       ctx.translate(chassisMidX, chassisMidY);
       ctx.rotate(pitch);
@@ -632,201 +771,318 @@ export default function RoadSimulation2D({
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
 
-      // 1. Rear Swingarm (from pivot at -18,2 back to rear axle at -55,12)
+      // A. REAR WHEEL MUDGUARD (Concentric to rear axle at -55, 0)
       ctx.beginPath();
-      ctx.moveTo(-18, 2);
-      ctx.lineTo(-55, 12);
-      ctx.lineTo(-55, 6);
-      ctx.lineTo(-18, -2);
-      ctx.closePath();
+      ctx.arc(-55, 0, wheelRadius + 3.5, -Math.PI * 0.90, -Math.PI * 0.20);
       ctx.stroke();
 
-      // Rear Monoshock Suspension Coil Spring
-      ctx.strokeStyle = "#d4d4d8";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(-32, 6);
-      ctx.lineTo(-14, -14);
-      ctx.stroke();
+      // Rear Red Commuter Tail Lamp & Reflector
+      ctx.fillStyle = "#ef4444";
+      ctx.fillRect(-60, -16, 5, 8);
+      ctx.strokeStyle = "#b91c1c";
+      ctx.strokeRect(-60, -16, 5, 8);
 
-      // 2. Engine Block & Transmission (Center)
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(-18, -4);
-      ctx.lineTo(16, -4);
-      ctx.lineTo(16, 12);
-      ctx.lineTo(-18, 12);
-      ctx.closePath();
-      ctx.stroke();
-
-      // Engine Cylinder Cooling Fins
-      ctx.beginPath();
-      ctx.moveTo(-12, 0);
-      ctx.lineTo(10, 0);
-      ctx.moveTo(-12, 4);
-      ctx.lineTo(10, 4);
-      ctx.moveTo(-12, 8);
-      ctx.lineTo(10, 8);
-      ctx.stroke();
-
-      // 3. Compact Upswept Exhaust System (Exhaust pipe to rear left)
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(12, 4);
-      ctx.lineTo(4, 15);
-      ctx.lineTo(-16, 15);
-      ctx.lineTo(-46, 6); // Upswept muffler
-      ctx.lineTo(-58, 4);
-      ctx.stroke();
-
-      // Muffler Heat Shield
-      ctx.strokeStyle = "#a1a1aa";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-22, 12);
-      ctx.lineTo(-48, 6);
-      ctx.stroke();
-
-      // 4. Trellis Frame & Footpeg
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(-18, 2);
-      ctx.lineTo(12, -22); // Diagonal brace
-      ctx.moveTo(0, 12);
-      ctx.lineTo(34, -28); // Lower spar to headstock
-      ctx.stroke();
-
-      // Rider Footpeg
-      ctx.beginPath();
-      ctx.moveTo(-8, 12);
-      ctx.lineTo(-8, 18);
-      ctx.lineTo(-2, 18);
-      ctx.stroke();
-
-      // 5. Sculpted Fuel Tank (Facing Right)
-      ctx.beginPath();
-      ctx.moveTo(34, -28); // Headstock joint
-      ctx.lineTo(10, -34); // Tank peak
-      ctx.lineTo(-8, -20); // Tank rear / seat junction
-      ctx.lineTo(4, -14);  // Knee recess lower edge
-      ctx.closePath();
-      ctx.stroke();
-
-      // 6. Stepped Sport Rider & Pillion Seat
-      ctx.beginPath();
-      ctx.moveTo(-8, -20); // Front seat nose
-      ctx.lineTo(-30, -20); // Rider saddle dip
-      ctx.lineTo(-38, -28); // Pillion step rise
-      ctx.lineTo(-58, -28); // Tail end
-      ctx.lineTo(-52, -18); // Lower undertray
-      ctx.lineTo(-8, -16);
-      ctx.closePath();
-      ctx.stroke();
-
-      // Rear Tail Light & License Tidy (Facing Left)
-      ctx.strokeStyle = "#ef4444"; // Red tail marker
-      ctx.beginPath();
-      ctx.moveTo(-58, -28);
-      ctx.lineTo(-64, -26);
-      ctx.lineTo(-58, -22);
-      ctx.stroke();
-
-      // 7. Front Telescopic Fork Assembly (Angling down-right to front axle)
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(34, -28); // Triple clamp
-      ctx.lineTo(55, 12);  // Front axle
-      ctx.stroke();
-
-      // Front Mudguard / Fender
-      ctx.beginPath();
-      ctx.arc(55, 12, wheelRadius + 4, -Math.PI * 0.75, -Math.PI * 0.15);
-      ctx.stroke();
-
-      // 8. Handlebars with Levers & Rear-View Mirror
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(34, -28);
-      ctx.lineTo(32, -42); // Handlebar riser
-      ctx.lineTo(26, -44); // Grip
-      ctx.lineTo(32, -44); // Brake lever
-      ctx.stroke();
-
-      // Mirror stalk angling up-back
-      ctx.beginPath();
-      ctx.moveTo(32, -42);
-      ctx.lineTo(26, -54);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(24, -56, 3, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // 9. Aerodynamic Front Headlight Fairing / Cowl (Facing Right)
-      ctx.beginPath();
-      ctx.moveTo(34, -28);
-      ctx.lineTo(48, -26); // Headlight nose
-      ctx.lineTo(48, -18);
-      ctx.lineTo(36, -14);
-      ctx.closePath();
-      ctx.stroke();
-
-      // Headlight Lens (Facing Forward to the Right)
-      ctx.strokeStyle = "#fef08a";
-      ctx.beginPath();
-      ctx.moveTo(48, -26);
-      ctx.lineTo(48, -18);
-      ctx.stroke();
-
-      // Upper Cowl Brow & Sensor Mounting Shelf (Positioned ABOVE Headlights)
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(34, -28);
-      ctx.lineTo(42, -34); // Rising cowl brow line above headlight
-      ctx.lineTo(49, -34); // Sensor platform shelf
-      ctx.stroke();
-
-      // Strut bracket connecting cowl brow to headlight housing
+      // License Plate / Tidy Bracket
       ctx.strokeStyle = "#71717a";
       ctx.lineWidth = 1.2;
       ctx.beginPath();
-      ctx.moveTo(48, -34);
-      ctx.lineTo(48, -26);
+      ctx.moveTo(-58, -8);
+      ctx.lineTo(-64, -2);
       ctx.stroke();
 
-      // 10. TF02-Pro LiDAR Sensor Unit (Mounted ABOVE headlights, facing forward-down to RIGHT)
-      const sensorLocalX = 47;
-      const sensorLocalY = -34;
+      // B. REAR COMMUTER SWINGARM (From frame pivot at -10, 4 directly to rear axle at -55, 0)
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(-10, 4);
+      ctx.lineTo(-55, 0);
+      ctx.stroke();
+
+      // C. COMMUTER ENCLOSED CHAINCASE (Metal protective box from engine to rear axle)
+      ctx.strokeStyle = "#a1a1aa";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(-6, 4);
+      ctx.lineTo(-55, -2);
+      ctx.lineTo(-55, 2);
+      ctx.lineTo(-6, 7);
+      ctx.closePath();
+      ctx.stroke();
+
+      // D. DUAL REAR SHOCK ABSORBERS (From subframe mount at -36, -14 straight to swingarm at -50, 0)
+      // Chrome Damper Rod
+      ctx.strokeStyle = "#e4e4e7";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-36, -14);
+      ctx.lineTo(-50, 0);
+      ctx.stroke();
+
+      // Helical Coil Spring Windings
+      ctx.strokeStyle = "#d4d4d8";
+      ctx.lineWidth = 1.8;
+      const shockSteps = 5;
+      for (let i = 1; i <= shockSteps; i++) {
+        const t = i / (shockSteps + 1);
+        const sx = -36 + t * (-50 - -36);
+        const sy = -14 + t * (0 - -14);
+        ctx.beginPath();
+        ctx.moveTo(sx - 2, sy - 2);
+        ctx.lineTo(sx + 2, sy + 2);
+        ctx.stroke();
+      }
+
+      // E. ENGINE & TRANSMISSION BLOCK (125cc Horizontal-Slanted Commuter Engine)
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.8;
+      // Crankcase
+      ctx.beginPath();
+      ctx.rect(-12, 2, 20, 10);
+      ctx.stroke();
+
+      // Horizontal Cylinder & Head with Air Cooling Fins
+      ctx.beginPath();
+      ctx.moveTo(8, 2);
+      ctx.lineTo(20, -2);
+      ctx.lineTo(20, 6);
+      ctx.lineTo(8, 10);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Cylinder Cooling Fins
+      ctx.strokeStyle = "#a1a1aa";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(10, 1); ctx.lineTo(10, 9);
+      ctx.moveTo(13, 0); ctx.lineTo(13, 8);
+      ctx.moveTo(16, -1); ctx.lineTo(16, 7);
+      ctx.stroke();
+
+      // Carburetor & Air Intake
+      ctx.strokeStyle = "#71717a";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.rect(0, -6, 6, 6);
+      ctx.stroke();
+
+      // Rider Footpeg
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(-2, 10);
+      ctx.lineTo(-2, 16);
+      ctx.lineTo(4, 16);
+      ctx.stroke();
+
+      // F. LONG COMMUTER EXHAUST SYSTEM & CHROME HEAT SHIELD
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(18, 2); // Cylinder exhaust port
+      ctx.lineTo(12, 12); // Header downpipe curve
+      ctx.lineTo(-4, 12); // Underbelly pipe
+      ctx.lineTo(-56, 4); // Long straight commuter muffler
+      ctx.stroke();
+
+      // Chrome Slotted Heat Guard Plate
+      ctx.strokeStyle = "#a1a1aa";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(-16, 10);
+      ctx.lineTo(-46, 6);
+      ctx.stroke();
+
+      // G. COMMUTER TUBULAR FRAME (Backbone & Twin Cradle)
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(30, -24); // Steering headstock
+      ctx.lineTo(8, -14);  // Backbone tube
+      ctx.lineTo(-10, 4);  // Swingarm pivot bracket
+      ctx.moveTo(30, -24);
+      ctx.lineTo(12, 8);   // Down-tube cradle
+      ctx.lineTo(-12, 8);  // Engine cradle
+      ctx.stroke();
+
+      // H. COMMUTER FUEL TANK (Sleek utilitarian profile)
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(30, -24); // Headstock junction
+      ctx.lineTo(14, -28); // Tank top peak
+      ctx.lineTo(-6, -16); // Seat nose junction
+      ctx.lineTo(4, -14);  // Knee pad lower edge
+      ctx.lineTo(24, -14);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Chrome Fuel Cap
+      ctx.strokeStyle = "#e4e4e7";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(16, -30, 2.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Tank Rubber Knee Grip Badge
+      ctx.strokeStyle = "#71717a";
+      ctx.lineWidth = 1.0;
+      ctx.beginPath();
+      ctx.moveTo(10, -22);
+      ctx.lineTo(20, -20);
+      ctx.lineTo(18, -16);
+      ctx.lineTo(8, -16);
+      ctx.closePath();
+      ctx.stroke();
+
+      // I. LONG FLAT COMMUTER SEAT (Rider + Pillion with Rear Carrier)
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(-6, -16);  // Front nose
+      ctx.lineTo(-46, -16); // Seat top profile (flat & comfortable)
+      ctx.lineTo(-46, -11); // Seat base tail
+      ctx.lineTo(-6, -11);  // Seat base front
+      ctx.closePath();
+      ctx.stroke();
+
+      // Side Battery Utility Panel below seat
+      ctx.strokeStyle = "#71717a";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.rect(-24, -10, 16, 12);
+      ctx.stroke();
+
+      // Chrome Luggage Carrier / Pillion Grab Rail
+      ctx.strokeStyle = "#e4e4e7";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-38, -16);
+      ctx.lineTo(-58, -18);
+      ctx.lineTo(-58, -14);
+      ctx.lineTo(-46, -12);
+      ctx.stroke();
+
+      // J. FRONT TELESCOPIC FORK ASSEMBLY (From headstock 30,-24 straight to front axle 55,0)
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(30, -24); // Triple clamp
+      ctx.lineTo(55, 0);   // Front axle hub
+      ctx.stroke();
+
+      // Rubber Accordion Fork Gaiter Boots
+      ctx.strokeStyle = "#71717a";
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(38, -16);
+      ctx.lineTo(44, -10);
+      ctx.stroke();
+
+      // K. FRONT WHEEL MUDGUARD (Concentric to front axle at 55, 0)
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(55, 0, wheelRadius + 3.5, -Math.PI * 0.80, -Math.PI * 0.15);
+      ctx.stroke();
+
+      // Mudguard Mounting Stay Strut
+      ctx.strokeStyle = "#71717a";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(55, 0);
+      ctx.lineTo(44, -14);
+      ctx.stroke();
+
+      // L. HANDLEBARS, CONTROLS & TWIN GAUGES
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(30, -24); // Clamp
+      ctx.lineTo(26, -36); // Handlebar riser
+      ctx.lineTo(20, -38); // Grip
+      ctx.stroke();
+
+      // Brake Lever
+      ctx.strokeStyle = "#a1a1aa";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(24, -37);
+      ctx.lineTo(28, -39);
+      ctx.stroke();
+
+      // Commuter Twin Round Instrument Dials (Speedometer / Fuel Gauge)
+      ctx.strokeStyle = "#e4e4e7";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(28, -38, 2.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Round Chrome Rear-View Mirror
+      ctx.strokeStyle = "#e4e4e7";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(26, -36);
+      ctx.lineTo(20, -48);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(18, -50, 3, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // M. COMMUTER HEADLIGHT & AMBER INDICATORS
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(32, -24);
+      ctx.lineTo(42, -20);
+      ctx.lineTo(42, -14);
+      ctx.lineTo(34, -16);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Yellow Headlight Glass Lens
+      ctx.strokeStyle = "#fef08a";
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(42, -20);
+      ctx.lineTo(42, -14);
+      ctx.stroke();
+
+      // Amber Turn Signal Indicator
+      ctx.fillStyle = "#f59e0b";
+      ctx.beginPath();
+      ctx.arc(36, -26, 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // N. TF02-PRO LIDAR SENSOR UNIT & RIGID MOUNT (Mounted above headlight shelf)
+      const sensorLocalX = 44;
+      const sensorLocalY = -30;
 
       ctx.save();
       ctx.translate(sensorLocalX, sensorLocalY);
       ctx.rotate(FIXED_BEAM_ANGLE_RAD);
 
-      // LiDAR Mounting Swivel Collar
+      // LiDAR Mounting Shelf Bracket
       ctx.strokeStyle = "#71717a";
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
-      ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
+      ctx.moveTo(-6, 4);
+      ctx.lineTo(0, 0);
       ctx.stroke();
 
-      // LiDAR Outer Casing
+      // TF02-Pro Housing
       ctx.fillStyle = "#09090b";
       ctx.fillRect(-4, -4, 12, 8);
-      ctx.strokeStyle = "#f97316"; // Fiery red-amber housing accent
-      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = "#f97316"; // Fiery red-amber LiDAR casing accent
+      ctx.lineWidth = 1.4;
       ctx.strokeRect(-4, -4, 12, 8);
 
-      // Optical Emitter Lens (Facing right-down)
-      ctx.fillStyle = "#ef4444"; // Vivid red lens
+      // Red Laser Emitter Lens (Facing right-downward)
+      ctx.fillStyle = "#ef4444";
       ctx.beginPath();
       ctx.arc(8, 0, 2.2, 0, Math.PI * 2);
       ctx.fill();
 
-      // Lens amber glow halo
+      // Amber Glow Halo
       ctx.strokeStyle = "#f59e0b";
       ctx.lineWidth = 0.8;
       ctx.beginPath();
@@ -839,8 +1095,8 @@ export default function RoadSimulation2D({
       // 5. FIXED 5.0 METER LIDAR LASER BEAM RAYCAST
       const cosP = Math.cos(pitch);
       const sinP = Math.sin(pitch);
-      const sensorLocalOffsetX = 47;
-      const sensorLocalOffsetY = -34;
+      const sensorLocalOffsetX = 44;
+      const sensorLocalOffsetY = -30;
 
       const lidarOriginX = chassisMidX + sensorLocalOffsetX * cosP - sensorLocalOffsetY * sinP;
       const lidarOriginY = chassisMidY + sensorLocalOffsetX * sinP + sensorLocalOffsetY * cosP;
@@ -913,11 +1169,13 @@ export default function RoadSimulation2D({
       }
 
       // Generator mode anomaly confirmation
+      let activeScannedHazard = null;
       if (simMode === "generator") {
         for (const anom of anomaliesRef.current) {
           const worldHitX = distanceTraveledRef.current + hitX;
           const halfWidthPx = (anom.widthCm * pixelsPerCm) / 2;
           if (Math.abs(worldHitX - anom.worldX) < halfWidthPx) {
+            activeScannedHazard = anom;
             if (!anom.detected) {
               anom.detected = true;
               detectedCountRef.current += 1;
@@ -937,14 +1195,16 @@ export default function RoadSimulation2D({
                 id: Date.now(),
                 time: new Date().toLocaleTimeString(),
                 type: detectedTypeName,
-                deviation_cm: `${anom.depthCm > 0 ? "+" : ""}${anom.depthCm.toFixed(1)} cm (${(anom.depthCm / 2.54).toFixed(1)} in)`,
+                deviation_cm: `${anom.depthCm > 0 ? "+" : ""}${anom.depthCm.toFixed(1)}`,
                 depth_cm: Math.abs(anom.depthCm),
                 depth_in: Math.round((Math.abs(anom.depthCm) / 2.54) * 10) / 10,
                 length_cm: anom.widthCm,
                 length_ft: Math.round((anom.widthCm / 30.48) * 10) / 10,
                 width_cm: Math.round(anom.widthCm * 0.8),
-                severity: Math.abs(anom.depthCm) >= 8.0 ? "Critical" : "Moderate",
+                severity: Math.abs(anom.depthCm) >= 8.0 ? "Deep / Dangerous" : "Shallow",
                 confidence: "98%",
+                strength: 1100,
+                baseline: `${baseValueCm.toFixed(0)}`,
                 slant_range_cm: Math.round(measuredSlantCm * 10) / 10,
                 slant_range_m: Math.round(measuredSlantM * 100) / 100,
                 slant_range_ft: Math.round(measuredSlantFt * 10) / 10,
@@ -952,7 +1212,7 @@ export default function RoadSimulation2D({
                 lead_dist_ft: Math.round(leadDistanceFt * 10) / 10,
               };
 
-              setSessionDetections((prev) => [detectedObj, ...prev.slice(0, 24)]);
+              setSessionDetections((prev) => [detectedObj, ...prev.slice(0, 49)]);
 
               if (onSimulatedAnomaly) {
                 onSimulatedAnomaly(detectedObj);
@@ -970,6 +1230,9 @@ export default function RoadSimulation2D({
         slantDistanceCm: Math.round(measuredSlantCm * 10) / 10,
         slantDistanceM: Math.round(measuredSlantM * 100) / 100,
         slantDistanceFt: Math.round(measuredSlantFt * 10) / 10,
+        baseValueCm: Math.round(baseValueCm * 10) / 10,
+        baseValueM: Math.round((baseValueCm / 100) * 100) / 100,
+        baseValueFt: Math.round((baseValueCm / 30.48) * 10) / 10,
         verticalDepthCm: Math.round(verticalHeightCm * 10) / 10,
         verticalDepthM: Math.round(verticalHeightM * 100) / 100,
         verticalDepthIn: Math.round(verticalHeightIn * 10) / 10,
@@ -983,13 +1246,14 @@ export default function RoadSimulation2D({
         surfaceType: activeClass,
         isAlert,
         severity: severityLabel,
-        detectedCount: simMode === "generator" ? detectedCountRef.current : (telemetry?.pothole_count || 0) + (telemetry?.bump_count || 0),
+        detectedCount: simMode === "generator" ? detectedCountRef.current : (potholeCount + bumpCount),
+        activeHazard: activeScannedHazard,
       });
 
       // 6. DRAW LASER BEAM (FIERY RED-AMBER MIXED)
       ctx.save();
       // Outer glow
-      ctx.strokeStyle = isDeep ? "rgba(239, 68, 68, 0.4)" : isAlert ? "rgba(245, 158, 11, 0.4)" : "rgba(249, 115, 22, 0.3)";
+      ctx.strokeStyle = isDeep ? "rgba(239, 68, 68, 0.45)" : isAlert ? "rgba(245, 158, 11, 0.45)" : "rgba(249, 115, 22, 0.35)";
       ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.moveTo(lidarOriginX, lidarOriginY);
@@ -1024,6 +1288,42 @@ export default function RoadSimulation2D({
       ctx.font = "bold 9px monospace";
       ctx.fillText(`5.0m Ray (R: ${measuredSlantM.toFixed(2)}m / ${measuredSlantFt.toFixed(1)}ft)`, midX + 12, midY - 6);
 
+      // 7. FLOATING HAZARD CALLOUT OVER ACTIVE DETECTED ROAD ANOMALY
+      if (isAlert) {
+        ctx.save();
+        ctx.translate(hitX, hitY - 32);
+
+        // Callout Tag Background
+        ctx.fillStyle = isDeep ? "rgba(220, 38, 38, 0.95)" : "rgba(217, 119, 6, 0.95)";
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(-55, -14, 110, 24, [4]);
+        ctx.fill();
+        ctx.stroke();
+
+        // Pin pointer triangle
+        ctx.beginPath();
+        ctx.moveTo(-5, 10);
+        ctx.lineTo(0, 18);
+        ctx.lineTo(5, 10);
+        ctx.fill();
+
+        // Text in Callout
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 9px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(
+          `${deltaVerticalCm > 0 ? "POTHOLE" : "BUMP"} ${Math.abs(deltaVerticalCm).toFixed(1)}cm`,
+          0,
+          -2
+        );
+        ctx.font = "8px monospace";
+        ctx.fillText(`Lead: ${leadDistanceM.toFixed(2)}m | ${timeToImpactMs}ms`, 0, 7);
+
+        ctx.restore();
+      }
+
       ctx.restore();
 
       ctx.restore(); // Restore high-DPI scaling
@@ -1034,10 +1334,23 @@ export default function RoadSimulation2D({
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [isRunning, simSpeedKmph, simMode, autoSpawn, settings, spawnAnomaly, onSimulatedAnomaly, isHardwareAvailable, roadPreset]);
+  }, [
+    isRunning,
+    simSpeedKmph,
+    simMode,
+    autoSpawn,
+    settings,
+    spawnAnomaly,
+    onSimulatedAnomaly,
+    isHardwareAvailable,
+    roadPreset,
+    baseValueCm,
+    potholeCount,
+    bumpCount,
+  ]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 font-sans">
       {/* Simulation Master Control Bar */}
       <div className="bg-white border border-zinc-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
         {/* Left: Play / Reset / Presets */}
@@ -1132,55 +1445,91 @@ export default function RoadSimulation2D({
         </div>
       </div>
 
-      {/* Fixed 5-Meter LiDAR Telemetry Header Bar */}
-      <div className="bg-white border border-zinc-200 rounded-lg p-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shadow-xs font-mono">
-        {/* 1. Fixed Range */}
+      {/* Primary LiDAR Telemetry & Base Value Metric Bar (7 Cards) */}
+      <div className="bg-white border border-zinc-200 rounded-lg p-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 shadow-xs font-mono">
+        {/* 1. Sensor Baseline / Base Value (d0) */}
         <div className="border-r border-zinc-100 pr-2">
-          <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">LiDAR Beam Spec</span>
-          <span className="text-xs font-bold text-zinc-900 block">5.0m Fixed Slant</span>
-          <span className="text-[10px] text-zinc-500">500 cm / 16.4 ft</span>
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Sensor Base (d₀)</span>
+            <Compass className="w-3 h-3 text-zinc-400" />
+          </div>
+          <span className="text-xs font-bold text-amber-700 block mt-0.5">{hudStats.baseValueCm} cm</span>
+          <span className="text-[10px] text-zinc-500 truncate block">
+            {isHardwareAvailable
+              ? isCalibrated
+                ? "Auto-Calibrated (20-pt mean)"
+                : `Calibrating (${warmupCount}/${warmupTotal})`
+              : `${hudStats.baseValueM} m | ${hudStats.baseValueFt} ft`}
+          </span>
         </div>
 
-        {/* 2. Measured Slant Distance */}
+        {/* 2. Measured Slant Distance (R) */}
         <div className="border-r border-zinc-100 pr-2">
-          <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Measured Slant (R)</span>
-          <span className="text-xs font-bold text-orange-600 block">{hudStats.slantDistanceCm} cm</span>
-          <span className="text-[10px] text-zinc-500">{hudStats.slantDistanceM} m | {hudStats.slantDistanceFt} ft</span>
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Measured Slant (R)</span>
+            <Radio className="w-3 h-3 text-zinc-400" />
+          </div>
+          <span className="text-xs font-bold text-orange-600 block mt-0.5">{hudStats.slantDistanceCm} cm</span>
+          <span className="text-[10px] text-zinc-500 block">{hudStats.slantDistanceM} m | {hudStats.slantDistanceFt} ft</span>
         </div>
 
-        {/* 3. Surface Deviation */}
+        {/* 3. Surface Deviation (Delta d) */}
         <div className="border-r border-zinc-100 pr-2">
-          <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Surface Dev (Δd)</span>
-          <span className={`text-xs font-bold block ${hudStats.deviationCm > 4.5 ? "text-rose-600" : hudStats.deviationCm < -4.5 ? "text-blue-600" : "text-zinc-900"}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Surface Dev (Δd)</span>
+            <ArrowUpDown className="w-3 h-3 text-zinc-400" />
+          </div>
+          <span className={`text-xs font-bold block mt-0.5 ${hudStats.deviationCm > 4.5 ? "text-rose-600" : hudStats.deviationCm < -4.5 ? "text-blue-600" : "text-zinc-900"}`}>
             {hudStats.deviationCm > 0 ? `+${hudStats.deviationCm}` : hudStats.deviationCm} cm
           </span>
-          <span className="text-[10px] text-zinc-500">{hudStats.deviationMm} mm | {hudStats.deviationIn} in</span>
+          <span className="text-[10px] text-zinc-500 block">{hudStats.deviationMm} mm | {hudStats.deviationIn} in</span>
         </div>
 
         {/* 4. Lookahead Distance */}
         <div className="border-r border-zinc-100 pr-2">
-          <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Tire Lead Distance</span>
-          <span className="text-xs font-bold text-emerald-700 block">{hudStats.earlyWarningLeadM} m</span>
-          <span className="text-[10px] text-zinc-500">{hudStats.earlyWarningLeadCm} cm | {hudStats.earlyWarningLeadFt} ft</span>
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Lookahead Lead</span>
+            <Ruler className="w-3 h-3 text-zinc-400" />
+          </div>
+          <span className="text-xs font-bold text-emerald-700 block mt-0.5">{hudStats.earlyWarningLeadM} m</span>
+          <span className="text-[10px] text-zinc-500 block">{hudStats.earlyWarningLeadCm} cm | {hudStats.earlyWarningLeadFt} ft</span>
         </div>
 
         {/* 5. Warning Reaction Window */}
         <div className="border-r border-zinc-100 pr-2">
-          <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Time to Impact</span>
-          <span className="text-xs font-bold text-indigo-700 block">{hudStats.timeToImpactMs} ms</span>
-          <span className="text-[10px] text-zinc-500">{(hudStats.timeToImpactMs / 1000).toFixed(2)} s reaction</span>
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Time to Impact</span>
+            <Clock className="w-3 h-3 text-zinc-400" />
+          </div>
+          <span className="text-xs font-bold text-indigo-700 block mt-0.5">{hudStats.timeToImpactMs} ms</span>
+          <span className="text-[10px] text-zinc-500 block">{(hudStats.timeToImpactMs / 1000).toFixed(2)} s reaction</span>
         </div>
 
         {/* 6. Current Speed */}
+        <div className="border-r border-zinc-100 pr-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Vehicle Speed</span>
+            <Gauge className="w-3 h-3 text-zinc-400" />
+          </div>
+          <span className="text-xs font-bold text-zinc-900 block mt-0.5">{hudStats.speedKmph} km/h</span>
+          <span className="text-[10px] text-zinc-500 block">{hudStats.speedMps} m/s | {hudStats.speedMph} mph</span>
+        </div>
+
+        {/* 7. Total Detected Anomalies */}
         <div>
-          <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Vehicle Speed</span>
-          <span className="text-xs font-bold text-zinc-900 block">{hudStats.speedKmph} km/h</span>
-          <span className="text-[10px] text-zinc-500">{hudStats.speedMps} m/s | {hudStats.speedMph} mph</span>
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Event Counts</span>
+            <Zap className="w-3 h-3 text-zinc-400" />
+          </div>
+          <span className="text-xs font-bold text-rose-600 block mt-0.5">{hudStats.detectedCount}</span>
+          <span className="text-[10px] text-zinc-500 block">
+            {potholeCount} holes | {bumpCount} bumps
+          </span>
         </div>
       </div>
 
       {/* Main 2D Canvas Viewport */}
-      <div className="relative w-full h-[420px] bg-black border border-zinc-800 rounded-lg overflow-hidden shadow-sm">
+      <div className="relative w-full h-[430px] bg-black border border-zinc-800 rounded-lg overflow-hidden shadow-sm">
         <canvas ref={canvasRef} className="w-full h-full block cursor-crosshair" />
 
         {/* Top Left Live HUD Badges */}
@@ -1199,9 +1548,11 @@ export default function RoadSimulation2D({
           </div>
 
           <div className="bg-zinc-900/90 text-zinc-200 border border-zinc-700 px-3 py-1.5 rounded-md text-xs font-mono shadow-md hidden sm:block">
+            Base d₀: <span className="font-bold text-amber-400">{hudStats.baseValueCm} cm</span>
+            <span className="mx-2 text-zinc-600">|</span>
             Slant R: <span className="font-bold text-white">{hudStats.slantDistanceCm} cm</span>
             <span className="mx-2 text-zinc-600">|</span>
-            Lead: <span className="font-bold text-emerald-400">{hudStats.earlyWarningLeadM} m ({hudStats.earlyWarningLeadFt} ft)</span>
+            Lead: <span className="font-bold text-emerald-400">{hudStats.earlyWarningLeadM} m</span>
           </div>
         </div>
 
@@ -1211,7 +1562,7 @@ export default function RoadSimulation2D({
             Speed: <span className="font-semibold text-white">{hudStats.speedKmph} km/h</span>
           </div>
           <div className="bg-zinc-900/90 text-zinc-200 border border-zinc-700 px-2.5 py-1.5 rounded-md text-xs font-mono shadow-md">
-            Anomalies: <span className="font-semibold text-rose-400">{hudStats.detectedCount}</span>
+            Events: <span className="font-semibold text-rose-400">{hudStats.detectedCount}</span>
           </div>
         </div>
 
@@ -1252,67 +1603,137 @@ export default function RoadSimulation2D({
         )}
       </div>
 
-      {/* Simulation Session Detections Table */}
+      {/* Comprehensive Road Anomaly Event Records Table (Synced with Backend & Dashboard) */}
       <div className="bg-white border border-zinc-200 rounded-lg p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider">
-            2D Simulation Road Anomaly Log (5m Laser Field)
-          </h3>
-          <span className="text-[10px] text-zinc-500 font-mono">
-            {sessionDetections.length} Events Recorded
-          </span>
+        {/* Header & Filter Controls */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-zinc-100 pb-3">
+          <div className="flex items-center space-x-2">
+            <ListFilter className="w-4 h-4 text-zinc-700" />
+            <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-wider">
+              Road Anomaly Event Records ({simMode === "hardware" ? "Live Sensor" : "5m Simulation"})
+            </h3>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-700 border border-zinc-200 font-mono font-semibold">
+              {filteredEventRecords.length} recorded
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 font-mono">
+            {/* Quick Search */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-zinc-400" />
+              <input
+                type="text"
+                placeholder="Filter events..."
+                value={eventSearch}
+                onChange={(e) => setEventSearch(e.target.value)}
+                className="bg-zinc-50 text-zinc-900 text-xs rounded-md pl-8 pr-3 py-1 border border-zinc-300 focus:outline-none focus:border-zinc-500 w-36 sm:w-44"
+              />
+            </div>
+
+            {/* Type filter */}
+            <select
+              value={eventFilter}
+              onChange={(e) => setEventFilter(e.target.value)}
+              className="bg-zinc-50 text-zinc-900 text-xs rounded-md px-2 py-1 border border-zinc-300 focus:outline-none focus:border-zinc-500"
+            >
+              <option value="ALL">All Hazards</option>
+              <option value="POTHOLE">Potholes Only</option>
+              <option value="DEEP">Deep / Dangerous Only</option>
+              <option value="BUMP">Speed Bumps Only</option>
+            </select>
+
+            {/* Export CSV */}
+            <button
+              onClick={exportCsv}
+              disabled={combinedEventRecords.length === 0}
+              className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium bg-zinc-100 text-zinc-700 hover:bg-zinc-200 disabled:opacity-40 rounded-md border border-zinc-300 transition"
+            >
+              <Download className="w-3 h-3" />
+              <span className="hidden sm:inline">Export</span>
+            </button>
+
+            {/* Clear Log */}
+            {onClearLog && (
+              <button
+                onClick={onClearLog}
+                disabled={combinedEventRecords.length === 0}
+                className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium text-rose-600 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 rounded-md border border-rose-200 transition"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span className="hidden sm:inline">Clear</span>
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="overflow-x-auto max-h-56 overflow-y-auto border border-zinc-100 rounded">
+        {/* Scrollable Event Log Table */}
+        <div className="overflow-x-auto max-h-64 overflow-y-auto border border-zinc-100 rounded">
           <table className="min-w-full text-xs text-left font-mono">
             <thead className="bg-zinc-50 text-zinc-500 text-[10px] uppercase border-b border-zinc-200 sticky top-0">
               <tr>
                 <th className="px-3 py-2">Time</th>
-                <th className="px-3 py-2">Anomaly Classification</th>
+                <th className="px-3 py-2">Classification</th>
+                <th className="px-3 py-2">Deviation vs Base (d₀)</th>
                 <th className="px-3 py-2">Depth / Height</th>
-                <th className="px-3 py-2">Length & Width</th>
-                <th className="px-3 py-2">Measured Slant (R)</th>
-                <th className="px-3 py-2">Lead Lead Ahead</th>
+                <th className="px-3 py-2">Length × Width</th>
+                <th className="px-3 py-2">Slant Range (R)</th>
+                <th className="px-3 py-2">Lookahead Lead</th>
                 <th className="px-3 py-2">Severity</th>
+                <th className="px-3 py-2">Confidence</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 text-zinc-700">
-              {sessionDetections.length > 0 ? (
-                sessionDetections.map((d) => (
-                  <tr key={d.id} className="hover:bg-zinc-50">
-                    <td className="px-3 py-1.5 text-zinc-500">{d.time}</td>
-                    <td className="px-3 py-1.5 font-semibold">
-                      <span className={d.type.includes("Deep") ? "text-red-600" : d.type.includes("Pothole") ? "text-amber-600" : "text-blue-600"}>
-                        {d.type}
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5 font-bold text-zinc-900">
-                      {d.depth_cm} cm <span className="text-zinc-400 font-normal">({d.depth_in} in)</span>
-                    </td>
-                    <td className="px-3 py-1.5 text-zinc-600">
-                      {d.length_cm} × {d.width_cm} cm <span className="text-zinc-400">({d.length_ft} ft)</span>
-                    </td>
-                    <td className="px-3 py-1.5 text-zinc-800 font-medium">
-                      {d.slant_range_cm} cm <span className="text-zinc-400">({d.slant_range_m}m / {d.slant_range_ft}ft)</span>
-                    </td>
-                    <td className="px-3 py-1.5 text-emerald-700 font-medium">
-                      {d.lead_dist_m} m <span className="text-zinc-400">({d.lead_dist_ft} ft)</span>
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                          d.severity === "Critical" ? "bg-red-50 text-red-700 border border-red-200" : "bg-amber-50 text-amber-700 border border-amber-200"
-                        }`}
-                      >
-                        {d.severity}
-                      </span>
-                    </td>
-                  </tr>
-                ))
+              {filteredEventRecords.length > 0 ? (
+                filteredEventRecords.map((d) => {
+                  const itemType = String(d.type || "Anomaly");
+                  const isDeepItem = itemType.toLowerCase().includes("deep") || String(d.severity || "").toLowerCase().includes("deep");
+                  const isPotholeItem = itemType.toLowerCase().includes("pothole");
+                  const isBumpItem = itemType.toLowerCase().includes("bump");
+
+                  return (
+                    <tr key={d.id} className="hover:bg-zinc-50">
+                      <td className="px-3 py-1.5 text-zinc-500">{d.time}</td>
+                      <td className="px-3 py-1.5 font-semibold">
+                        <span className={isDeepItem ? "text-red-600" : isPotholeItem ? "text-amber-600" : isBumpItem ? "text-blue-600" : "text-zinc-900"}>
+                          {itemType}
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 font-bold text-zinc-800">
+                        {d.deviation_cm ? `${d.deviation_cm} cm` : `${d.depth_cm ? `+${d.depth_cm}` : "0"} cm`}
+                      </td>
+                      <td className="px-3 py-1.5 font-bold text-zinc-950">
+                        {d.depth_cm} cm {d.depth_in && <span className="text-zinc-400 font-normal">({d.depth_in} in)</span>}
+                      </td>
+                      <td className="px-3 py-1.5 text-zinc-600">
+                        {d.length_cm || 0} × {d.width_cm || 0} cm {d.length_ft && <span className="text-zinc-400">({d.length_ft} ft)</span>}
+                      </td>
+                      <td className="px-3 py-1.5 text-zinc-800 font-medium">
+                        {d.slant_range_cm ? `${d.slant_range_cm} cm` : `${d.baseline || baseValueCm} cm`}
+                      </td>
+                      <td className="px-3 py-1.5 text-emerald-700 font-medium">
+                        {d.lead_dist_m ? `${d.lead_dist_m} m` : "4.93 m"}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                            String(d.severity || "").includes("Deep") || String(d.severity || "") === "Critical"
+                              ? "bg-red-50 text-red-700 border border-red-200"
+                              : "bg-amber-50 text-amber-700 border border-amber-200"
+                          }`}
+                        >
+                          {d.severity || "Moderate"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 text-zinc-500">
+                        {d.confidence || "Rule"}
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-zinc-400">
-                    No simulation detections yet. Drive forward or press key 1 / 2 / 3 to spawn anomalies ahead on the road.
+                  <td colSpan={9} className="px-3 py-6 text-center text-zinc-400">
+                    No matching event records found. Drive forward or press key 1 / 2 / 3 to spawn road anomalies.
                   </td>
                 </tr>
               )}
