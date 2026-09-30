@@ -77,25 +77,26 @@ DETECTIONS_CACHE_FILE = CACHE_DIR / "detections.json"
 SETTINGS_CACHE_FILE = CACHE_DIR / "settings.json"
 
 
+
 # ML Model Loader
 
+_last_temp_time = 0
+_last_temp_val = None
 def get_pi_temperature():
-    try:
-        with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
-            temp = float(f.read().strip()) / 1000.0
-            return round(temp, 1)
-    except Exception:
-        return None
-
-def get_pi_temperature():
-    try:
-        with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
-            temp = float(f.read().strip()) / 1000.0
-            return round(temp, 1)
-    except Exception:
-        return None
+    global _last_temp_time, _last_temp_val
+    import time
+    if time.time() - _last_temp_time > 5.0:
+        try:
+            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                temp = float(f.read().strip()) / 1000.0
+                _last_temp_val = round(temp, 1)
+        except Exception:
+            pass
+        _last_temp_time = time.time()
+    return _last_temp_val
 
 def load_ml_model():
+
     try:
         model = joblib.load("pothole_model.pkl")
         logger.info("ML model loaded successfully.")
@@ -177,7 +178,6 @@ class SystemManager:
             "is_alert": False,
             "alert_message": "",
             "cooldown_remaining": 0.0,
-            "pi_temperature": None,
             "pi_temperature": None,
         }
 
@@ -552,7 +552,6 @@ class SystemManager:
                 "alert_message": alert_msg,
                 "cooldown_remaining": round(cooldown_rem, 1),
                 "pi_temperature": get_pi_temperature(),
-                "pi_temperature": None,
         }
 
 
