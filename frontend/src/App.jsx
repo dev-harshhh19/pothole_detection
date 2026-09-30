@@ -7,6 +7,7 @@ import LiveCharts from "./components/LiveCharts";
 import DetectionLog from "./components/DetectionLog";
 import DiagnosticModal from "./components/DiagnosticModal";
 import SettingsModal from "./components/SettingsModal";
+import RoadSimulation2D from "./components/RoadSimulation2D";
 
 export default function App() {
   // Connection state
@@ -26,6 +27,15 @@ export default function App() {
   const [errorsCount, setErrorsCount] = useState(0);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+
+  // Active page view: "dashboard" or "simulation"
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem("pothole_active_tab") || "dashboard";
+  });
+
+  // Reset trigger counter for simulation sync
+  const [resetTrigger, setResetTrigger] = useState(0);
+
   // Telemetry metrics
   const [telemetry, setTelemetry] = useState({
     distance_cm: 0,
@@ -296,6 +306,15 @@ export default function App() {
       } catch {}
     }
   }, [logs]);
+
+  useEffect(() => {
+    if (activeTab) {
+      try {
+        localStorage.setItem("pothole_active_tab", activeTab);
+      } catch {}
+    }
+  }, [activeTab]);
+
   // Reset metrics and clear detection cache
   const handleResetMetrics = async () => {
     setIsResetting(true);
@@ -305,6 +324,7 @@ export default function App() {
       setBumpCount(0);
       setLastDepth(0);
       setLogs([]);
+      setResetTrigger((prev) => prev + 1);
       try {
         localStorage.removeItem("pothole_logs");
       } catch {}
@@ -344,7 +364,18 @@ export default function App() {
     try {
       localStorage.removeItem("pothole_logs");
     } catch {}
-  };;
+  };
+
+  // Handle anomalies detected in 2D simulation mode
+  const handleSimulatedAnomaly = (anomaly) => {
+    if (anomaly.type.includes("Pothole")) {
+      setPotholeCount((prev) => prev + 1);
+    } else if (anomaly.type.includes("Bump")) {
+      setBumpCount((prev) => prev + 1);
+    }
+    setLastDepth(anomaly.depth_cm);
+    setLogs((prev) => [anomaly, ...prev.slice(0, 99)]);
+  };
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 flex flex-col font-sans">
@@ -353,6 +384,8 @@ export default function App() {
         connected={connected}
         isSimulated={isSimulated}
         status={status}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenDiagnostic={() => setIsDiagnosticOpen(true)}
         onResetMetrics={handleResetMetrics}
@@ -361,52 +394,75 @@ export default function App() {
 
       {/* Main Body: Dynamic Page Rendering */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-4">
-        {/* Connection and Hardware Status Panel */}
-        <ConnectionPanel
-          connected={connected}
-          isSimulated={isSimulated}
-          status={status}
-          statusMessage={statusMessage}
-          selectedPort={selectedPort}
-          setSelectedPort={setSelectedPort}
-          availablePorts={availablePorts}
-          onRefreshPorts={fetchPorts}
-          baudRate={baudRate}
-          setBaudRate={setBaudRate}
-          onConnect={handleConnect}
-          onDisconnect={handleDisconnect}
-          onToggleSimulate={handleToggleSimulate}
-          framesReceived={framesReceived}
-          errorsCount={errorsCount}
-          isConnecting={isConnecting}
-        />
+        {activeTab === "dashboard" ? (
+          <>
+            {/* Connection and Hardware Status Panel */}
+            <ConnectionPanel
+              connected={connected}
+              isSimulated={isSimulated}
+              status={status}
+              statusMessage={statusMessage}
+              selectedPort={selectedPort}
+              setSelectedPort={setSelectedPort}
+              availablePorts={availablePorts}
+              onRefreshPorts={fetchPorts}
+              baudRate={baudRate}
+              setBaudRate={setBaudRate}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+              onToggleSimulate={handleToggleSimulate}
+              framesReceived={framesReceived}
+              errorsCount={errorsCount}
+              isConnecting={isConnecting}
+            />
 
-        {/* Telemetry Metrics Row */}
-        <TelemetryCards
-          telemetry={telemetry}
-          potholeCount={potholeCount}
-          bumpCount={bumpCount}
-          lastDepth={lastDepth}
-        />
+            {/* Telemetry Metrics Row */}
+            <TelemetryCards
+              telemetry={telemetry}
+              potholeCount={potholeCount}
+              bumpCount={bumpCount}
+              lastDepth={lastDepth}
+            />
 
-        {/* Live Surface Condition Banner */}
-        <DetectionAlert telemetry={telemetry} />
+            {/* Live Surface Condition Banner */}
+            <DetectionAlert telemetry={telemetry} />
 
-        {/* Telemetry Waveforms */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-              Sensor Waveforms (10 Hz Telemetry)
-            </h2>
-            <span className="text-[10px] text-zinc-500 font-mono">
-              Window: 100 samples
-            </span>
-          </div>
-          <LiveCharts history={history} />
-        </div>
+            {/* Telemetry Waveforms */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                  Sensor Waveforms (10 Hz Telemetry)
+                </h2>
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  Window: 100 samples
+                </span>
+              </div>
+              <LiveCharts history={history} />
+            </div>
 
-        {/* Anomaly Detection Log Table */}
-        <DetectionLog logs={logs} onClearLog={handleClearLog} />
+            {/* Anomaly Detection Log Table */}
+            <DetectionLog logs={logs} onClearLog={handleClearLog} />
+          </>
+        ) : (
+          <>
+            {/* Dedicated 2D Motorbike Road & Pothole Simulation Page */}
+            <RoadSimulation2D
+              telemetry={telemetry}
+              connected={connected}
+              isSimulated={isSimulated}
+              settings={settings}
+              resetTrigger={resetTrigger}
+              onResetSimulation={handleResetMetrics}
+              onSimulatedAnomaly={handleSimulatedAnomaly}
+              onSpeedChange={(speed) => handleSaveSettings({ ...settings, speed_kmph: speed })}
+              logs={logs}
+              onClearLog={handleClearLog}
+              potholeCount={potholeCount}
+              bumpCount={bumpCount}
+              lastDepth={lastDepth}
+            />
+          </>
+        )}
       </main>
 
       {/* Hardware Diagnostic Modal */}
