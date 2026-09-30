@@ -34,29 +34,13 @@ import {
  * - Multi-unit telemetry HUD (cm, m, ft, in, km/h, m/s, mph, ms).
  * - Right-to-left data registration (oncoming road ahead -> front wheel -> chassis -> rear wheel).
  */
-export default function RoadSimulation2D({
-  telemetry,
-  connected,
-  isSimulated,
-  settings,
-  resetTrigger,
-  onResetSimulation,
-  onSimulatedAnomaly,
-  onSpeedChange,
-  logs = [],
-  onClearLog,
-  potholeCount = 0,
-  bumpCount = 0,
-  lastDepth = 0,
-}) {
+export default function RoadSimulation2D({ telemetry, connected, settings }) {
   const canvasRef = useRef(null);
 
   // Hardware sync availability: only permitted when real physical sensor is detected
-  const isHardwareAvailable = Boolean(connected && !isSimulated);
+  
 
-  // Simulation mode: "generator" (autonomous procedural road) or "hardware" (synced to live LiDAR)
-  const [simMode, setSimMode] = useState("generator");
-  const [isRunning, setIsRunning] = useState(true);
+  // Simulation mode: "generator" (autonomous procedural road) or "hardware" (synced to live LiDAR)  const [isRunning, setIsRunning] = useState(true);
   const [simSpeedKmph, setSimSpeedKmph] = useState(30);
   const [autoSpawn, setAutoSpawn] = useState(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
@@ -67,20 +51,20 @@ export default function RoadSimulation2D({
   const roadPreset = "asphalt";
   // Automatically switch mode based on hardware availability
   useEffect(() => {
-    if (isHardwareAvailable) {
+    if (connected) {
       setSimMode("hardware");
     } else {
       setSimMode("generator");
     }
-  }, [isHardwareAvailable]);
+  }, [connected]);
 
   // Sensor Base Value calculation (auto-calibrated baseline or 500 cm nominal slant)
   const baseValueCm = useMemo(() => {
-    if (isHardwareAvailable && telemetry && typeof telemetry.baseline_cm === "number" && telemetry.baseline_cm > 0) {
+    if (connected && telemetry && typeof telemetry.baseline_cm === "number" && telemetry.baseline_cm > 0) {
       return telemetry.baseline_cm;
     }
     return 500.0; // Nominal 5.0m fixed beam baseline
-  }, [isHardwareAvailable, telemetry]);
+  }, [connected, telemetry]);
 
   const isCalibrated = Boolean(telemetry?.calibrated);
   const warmupCount = telemetry?.warmup_count || 0;
@@ -191,7 +175,7 @@ export default function RoadSimulation2D({
 
   // Push incoming live hardware telemetry into terrain buffer
   useEffect(() => {
-    if (simMode === "hardware" && isHardwareAvailable && telemetry) {
+    if (simMode === "hardware" && connected && telemetry) {
       const dev = typeof telemetry.deviation_cm === "number" ? telemetry.deviation_cm : 0;
       const canvas = canvasRef.current;
       const width = canvas ? canvas.width / (window.devicePixelRatio || 1) : 1000;
@@ -215,39 +199,9 @@ export default function RoadSimulation2D({
         hardwareTerrainBufferRef.current.shift();
       }
     }
-  }, [simMode, isHardwareAvailable, telemetry]);
+  }, [simMode, connected, telemetry]);
 
   // Manual anomaly spawner
-  const spawnAnomaly = useCallback((type) => {
-    const canvas = canvasRef.current;
-    const viewWidth = canvas ? canvas.width / (window.devicePixelRatio || 1) : 1000;
-    // Spawn ahead on the right side of the road
-    const worldX = distanceTraveledRef.current + viewWidth + 150;
-
-    let depthCm = 5.0;
-    let widthCm = 45;
-
-    if (type === "deep_pothole") {
-      depthCm = 10.0 + Math.random() * 4.5;
-      widthCm = 55 + Math.random() * 25;
-    } else if (type === "pothole") {
-      depthCm = 4.5 + Math.random() * 3.0;
-      widthCm = 40 + Math.random() * 15;
-    } else if (type === "bump") {
-      depthCm = -(4.5 + Math.random() * 3.5);
-      widthCm = 45 + Math.random() * 15;
-    }
-
-    anomaliesRef.current.push({
-      id: Date.now() + Math.random(),
-      worldX,
-      type,
-      depthCm: Math.round(depthCm * 10) / 10,
-      widthCm: Math.round(widthCm),
-      detected: false,
-    });
-  }, []);
-
   // Complete reset of simulation distance, anomaly queue, and session detections
   const handleReset = useCallback(() => {
     distanceTraveledRef.current = 0;
@@ -1366,7 +1320,7 @@ export default function RoadSimulation2D({
     settings,
     spawnAnomaly,
     onSimulatedAnomaly,
-    isHardwareAvailable,
+    connected,
     roadPreset,
     baseValueCm,
     potholeCount,
@@ -1374,166 +1328,8 @@ export default function RoadSimulation2D({
   ]);
 
   return (
-    <div className="space-y-4 font-sans">
-      {/* Simulation Master Control Bar */}
-      <div className="bg-white border border-zinc-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-        {/* Left: Play / Reset / Presets */}
-        <div className="flex items-center space-x-2 flex-wrap gap-y-2">
-          <button
-            onClick={() => setIsRunning(!isRunning)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              isRunning
-                ? "bg-zinc-900 text-white hover:bg-zinc-800 shadow-xs"
-                : "bg-emerald-600 text-white hover:bg-emerald-500 shadow-xs"
-            }`}
-          >
-            {isRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
-            <span>{isRunning ? "Pause (Space)" : "Resume (Space)"}</span>
-          </button>
-
-          <button
-            onClick={handleReset}
-            title="Reset Simulation Distance and Anomaly Log (Key R)"
-            className="flex items-center space-x-1 px-2.5 py-1.5 rounded-md text-xs font-medium bg-white text-zinc-700 hover:bg-zinc-50 border border-zinc-300 transition"
-          >
-            <RefreshCw className="w-3.5 h-3.5 text-zinc-500" />
-            <span className="hidden sm:inline">Reset</span>
-          </button>
-
-          <div className="h-5 w-px bg-zinc-200 mx-1"></div>
-        </div>
-
-        {/* Right: Manual Hazard Spawners */}
-        <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
-          {simMode === "generator" && (
-            <div className="flex items-center space-x-1">
-              <button
-                onClick={() => spawnAnomaly("pothole")}
-                title="Spawn shallow pothole (Key 1)"
-                className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200 rounded-md hover:bg-amber-100 transition"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Pothole</span>
-                <kbd className="hidden md:inline px-1 text-[9px] font-mono bg-white/80 border border-amber-200 rounded text-amber-800">1</kbd>
-              </button>
-
-              <button
-                onClick={() => spawnAnomaly("deep_pothole")}
-                title="Spawn deep hazardous pothole (Key 2)"
-                className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium bg-red-50 text-red-800 border border-red-200 rounded-md hover:bg-red-100 transition"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Deep Pothole</span>
-                <kbd className="hidden md:inline px-1 text-[9px] font-mono bg-white/80 border border-red-200 rounded text-red-800">2</kbd>
-              </button>
-
-              <button
-                onClick={() => spawnAnomaly("bump")}
-                title="Spawn speed bump (Key 3)"
-                className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium bg-blue-50 text-blue-800 border border-blue-200 rounded-md hover:bg-blue-100 transition"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Speed Bump</span>
-                <kbd className="hidden md:inline px-1 text-[9px] font-mono bg-white/80 border border-blue-200 rounded text-blue-800">3</kbd>
-              </button>
-            </div>
-          )}
-
-          <button
-            onClick={() => setShowShortcutsModal(true)}
-            title="Keyboard Shortcuts (?)"
-            className="p-1.5 text-zinc-500 hover:text-zinc-900 rounded-md hover:bg-zinc-100 border border-zinc-200 transition"
-          >
-            <Keyboard className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Primary LiDAR Telemetry & Base Value Metric Bar (7 Cards) */}
-      <div className="bg-white border border-zinc-200 rounded-lg p-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 shadow-xs font-mono">
-        {/* 1. Sensor Baseline / Base Value (d0) */}
-        <div className="border-r border-zinc-100 pr-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Sensor Base (d₀)</span>
-            <Compass className="w-3 h-3 text-zinc-400" />
-          </div>
-          <span className="text-xs font-bold text-amber-700 block mt-0.5">{hudStats.baseValueCm} cm</span>
-          <span className="text-[10px] text-zinc-500 truncate block">
-            {isHardwareAvailable
-              ? isCalibrated
-                ? "Auto-Calibrated (20-pt mean)"
-                : `Calibrating (${warmupCount}/${warmupTotal})`
-              : `${hudStats.baseValueM} m | ${hudStats.baseValueFt} ft`}
-          </span>
-        </div>
-
-        {/* 2. Measured Slant Distance (R) */}
-        <div className="border-r border-zinc-100 pr-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Measured Slant (R)</span>
-            <Radio className="w-3 h-3 text-zinc-400" />
-          </div>
-          <span className="text-xs font-bold text-orange-600 block mt-0.5">{hudStats.slantDistanceCm} cm</span>
-          <span className="text-[10px] text-zinc-500 block">{hudStats.slantDistanceM} m | {hudStats.slantDistanceFt} ft</span>
-        </div>
-
-        {/* 3. Surface Deviation (Delta d) */}
-        <div className="border-r border-zinc-100 pr-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Surface Dev (Δd)</span>
-            <ArrowUpDown className="w-3 h-3 text-zinc-400" />
-          </div>
-          <span className={`text-xs font-bold block mt-0.5 ${hudStats.deviationCm > 4.5 ? "text-rose-600" : hudStats.deviationCm < -4.5 ? "text-blue-600" : "text-zinc-900"}`}>
-            {hudStats.deviationCm > 0 ? `+${hudStats.deviationCm}` : hudStats.deviationCm} cm
-          </span>
-          <span className="text-[10px] text-zinc-500 block">{hudStats.deviationMm} mm | {hudStats.deviationIn} in</span>
-        </div>
-
-        {/* 4. Lookahead Distance */}
-        <div className="border-r border-zinc-100 pr-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Lookahead Lead</span>
-            <Ruler className="w-3 h-3 text-zinc-400" />
-          </div>
-          <span className="text-xs font-bold text-emerald-700 block mt-0.5">{hudStats.earlyWarningLeadM} m</span>
-          <span className="text-[10px] text-zinc-500 block">{hudStats.earlyWarningLeadCm} cm | {hudStats.earlyWarningLeadFt} ft</span>
-        </div>
-
-        {/* 5. Warning Reaction Window */}
-        <div className="border-r border-zinc-100 pr-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Time to Impact</span>
-            <Clock className="w-3 h-3 text-zinc-400" />
-          </div>
-          <span className="text-xs font-bold text-indigo-700 block mt-0.5">{hudStats.timeToImpactMs} ms</span>
-          <span className="text-[10px] text-zinc-500 block">{(hudStats.timeToImpactMs / 1000).toFixed(2)} s reaction</span>
-        </div>
-
-        {/* 6. Current Speed */}
-        <div className="border-r border-zinc-100 pr-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Vehicle Speed</span>
-            <Gauge className="w-3 h-3 text-zinc-400" />
-          </div>
-          <span className="text-xs font-bold text-zinc-900 block mt-0.5">{hudStats.speedKmph} km/h</span>
-          <span className="text-[10px] text-zinc-500 block">{hudStats.speedMps} m/s | {hudStats.speedMph} mph</span>
-        </div>
-
-        {/* 7. Total Detected Anomalies */}
-        <div>
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-zinc-400 uppercase tracking-wider block">Event Counts</span>
-            <Zap className="w-3 h-3 text-zinc-400" />
-          </div>
-          <span className="text-xs font-bold text-rose-600 block mt-0.5">{hudStats.detectedCount}</span>
-          <span className="text-[10px] text-zinc-500 block">
-            {potholeCount} holes | {bumpCount} bumps
-          </span>
-        </div>
-      </div>
-
-      {/* Main 2D Canvas Viewport */}
-      <div className="relative w-full h-[430px] bg-black border border-zinc-800 rounded-lg overflow-hidden shadow-sm">
+    <div className="font-sans w-full h-full flex flex-col justify-center items-center">
+      <div className="relative w-full h-full min-h-[300px] bg-black border border-zinc-800 rounded-lg overflow-hidden shadow-sm flex-shrink-0">
         <canvas ref={canvasRef} className="w-full h-full block cursor-crosshair" />
 
         {/* Top Left Live HUD Badges */}
@@ -1606,233 +1402,6 @@ export default function RoadSimulation2D({
           </div>
         )}
       </div>
-
-      {/* Comprehensive Road Anomaly Event Records Table (Synced with Backend & Dashboard) */}
-      <div className="bg-white border border-zinc-200 rounded-lg p-4 space-y-3">
-        {/* Header & Filter Controls */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-zinc-100 pb-3">
-          <div className="flex items-center space-x-2">
-            <ListFilter className="w-4 h-4 text-zinc-700" />
-            <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-wider">
-              Road Anomaly Event Records ({simMode === "hardware" ? "Live Sensor" : "5m Simulation"})
-            </h3>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-700 border border-zinc-200 font-mono font-semibold">
-              {filteredEventRecords.length} recorded
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 font-mono">
-            {/* Quick Search */}
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-zinc-400" />
-              <input
-                type="text"
-                placeholder="Filter events..."
-                value={eventSearch}
-                onChange={(e) => setEventSearch(e.target.value)}
-                className="bg-zinc-50 text-zinc-900 text-xs rounded-md pl-8 pr-3 py-1 border border-zinc-300 focus:outline-none focus:border-zinc-500 w-36 sm:w-44"
-              />
-            </div>
-
-            {/* Type filter */}
-            <select
-              value={eventFilter}
-              onChange={(e) => setEventFilter(e.target.value)}
-              className="bg-zinc-50 text-zinc-900 text-xs rounded-md px-2 py-1 border border-zinc-300 focus:outline-none focus:border-zinc-500"
-            >
-              <option value="ALL">All Hazards</option>
-              <option value="POTHOLE">Potholes Only</option>
-              <option value="DEEP">Deep / Dangerous Only</option>
-              <option value="BUMP">Speed Bumps Only</option>
-            </select>
-
-            {/* Export CSV */}
-            <button
-              onClick={exportCsv}
-              disabled={combinedEventRecords.length === 0}
-              className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium bg-zinc-100 text-zinc-700 hover:bg-zinc-200 disabled:opacity-40 rounded-md border border-zinc-300 transition"
-            >
-              <Download className="w-3 h-3" />
-              <span className="hidden sm:inline">Export</span>
-            </button>
-
-            {/* Clear Log */}
-            {onClearLog && (
-              <button
-                onClick={onClearLog}
-                disabled={combinedEventRecords.length === 0}
-                className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium text-rose-600 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 rounded-md border border-rose-200 transition"
-              >
-                <Trash2 className="w-3 h-3" />
-                <span className="hidden sm:inline">Clear</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Scrollable Event Log Table */}
-        <div className="overflow-x-auto max-h-64 overflow-y-auto border border-zinc-100 rounded">
-          <table className="min-w-full text-xs text-left font-mono">
-            <thead className="bg-zinc-50 text-zinc-500 text-[10px] uppercase border-b border-zinc-200 sticky top-0">
-              <tr>
-                <th className="px-3 py-2">Time</th>
-                <th className="px-3 py-2">Classification</th>
-                <th className="px-3 py-2">Deviation vs Base (d₀)</th>
-                <th className="px-3 py-2">Depth / Height</th>
-                <th className="px-3 py-2">Length × Width</th>
-                <th className="px-3 py-2">Slant Range (R)</th>
-                <th className="px-3 py-2">Lookahead Lead</th>
-                <th className="px-3 py-2">Severity</th>
-                <th className="px-3 py-2">Confidence</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100 text-zinc-700">
-              {filteredEventRecords.length > 0 ? (
-                filteredEventRecords.map((d) => {
-                  const itemType = String(d.type || "Anomaly");
-                  const isDeepItem = itemType.toLowerCase().includes("deep") || String(d.severity || "").toLowerCase().includes("deep");
-                  const isPotholeItem = itemType.toLowerCase().includes("pothole");
-                  const isBumpItem = itemType.toLowerCase().includes("bump");
-
-                  return (
-                    <tr key={d.id} className="hover:bg-zinc-50">
-                      <td className="px-3 py-1.5 text-zinc-500">{d.time}</td>
-                      <td className="px-3 py-1.5 font-semibold">
-                        <span className={isDeepItem ? "text-red-600" : isPotholeItem ? "text-amber-600" : isBumpItem ? "text-blue-600" : "text-zinc-900"}>
-                          {itemType}
-                        </span>
-                      </td>
-                      <td className="px-3 py-1.5 font-bold text-zinc-800">
-                        {d.deviation_cm ? `${d.deviation_cm} cm` : `${d.depth_cm ? `+${d.depth_cm}` : "0"} cm`}
-                      </td>
-                      <td className="px-3 py-1.5 font-bold text-zinc-950">
-                        {d.depth_cm} cm {d.depth_in && <span className="text-zinc-400 font-normal">({d.depth_in} in)</span>}
-                      </td>
-                      <td className="px-3 py-1.5 text-zinc-600">
-                        {d.length_cm || 0} × {d.width_cm || 0} cm {d.length_ft && <span className="text-zinc-400">({d.length_ft} ft)</span>}
-                      </td>
-                      <td className="px-3 py-1.5 text-zinc-800 font-medium">
-                        {d.slant_range_cm ? `${d.slant_range_cm} cm` : `${d.baseline || baseValueCm} cm`}
-                      </td>
-                      <td className="px-3 py-1.5 text-emerald-700 font-medium">
-                        {d.lead_dist_m ? `${d.lead_dist_m} m` : "4.93 m"}
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                            String(d.severity || "").includes("Deep") || String(d.severity || "") === "Critical"
-                              ? "bg-red-50 text-red-700 border border-red-200"
-                              : "bg-amber-50 text-amber-700 border border-amber-200"
-                          }`}
-                        >
-                          {d.severity || "Moderate"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-1.5 text-zinc-500">
-                        {d.confidence || "Rule"}
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={9} className="px-3 py-6 text-center text-zinc-400">
-                    No matching event records found. Drive forward or press key 1 / 2 / 3 to spawn road anomalies.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Keyboard Shortcuts Modal */}
-      {showShortcutsModal && (
-        <div
-          onClick={() => setShowShortcutsModal(false)}
-          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white border border-zinc-200 rounded-lg max-w-md w-full p-4 shadow-xl space-y-3 font-mono"
-          >
-            <div className="flex items-center justify-between border-b border-zinc-200 pb-2">
-              <div className="flex items-center space-x-2">
-                <Keyboard className="w-4 h-4 text-zinc-700" />
-                <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-wider">
-                  Simulation Keyboard Controls
-                </h3>
-              </div>
-              <button onClick={() => setShowShortcutsModal(false)} className="text-zinc-400 hover:text-zinc-700 transition">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <div className="grid grid-cols-2 py-1.5 border-b border-zinc-100 items-center">
-                <kbd className="px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold w-fit">Space</kbd>
-                <span className="text-zinc-600 text-right">Pause / Resume</span>
-              </div>
-
-              <div className="grid grid-cols-2 py-1.5 border-b border-zinc-100 items-center">
-                <kbd className="px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold w-fit">R</kbd>
-                <span className="text-zinc-600 text-right">Reset Sim & Data</span>
-              </div>
-
-              <div className="grid grid-cols-2 py-1.5 border-b border-zinc-100 items-center">
-                <div className="flex items-center space-x-1">
-                  <kbd className="px-1.5 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold">1</kbd>
-                  <kbd className="px-1.5 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold">2</kbd>
-                  <kbd className="px-1.5 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold">3</kbd>
-                </div>
-                <span className="text-zinc-600 text-right">Spawn Pothole / Deep / Bump</span>
-              </div>
-
-              <div className="grid grid-cols-2 py-1.5 border-b border-zinc-100 items-center">
-                <div className="flex items-center space-x-1">
-                  <kbd className="px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold">W</kbd>
-                  <span className="text-[10px] text-zinc-400">/</span>
-                  <kbd className="px-1.5 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold">↑</kbd>
-                </div>
-                <span className="text-zinc-600 text-right">Speed Up (+5 km/h)</span>
-              </div>
-
-              <div className="grid grid-cols-2 py-1.5 border-b border-zinc-100 items-center">
-                <div className="flex items-center space-x-1">
-                  <kbd className="px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold">S</kbd>
-                  <span className="text-[10px] text-zinc-400">/</span>
-                  <kbd className="px-1.5 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold">↓</kbd>
-                </div>
-                <span className="text-zinc-600 text-right">Speed Down (-5 km/h)</span>
-              </div>
-
-              <div className="grid grid-cols-2 py-1.5 border-b border-zinc-100 items-center">
-                <kbd className="px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold w-fit">H</kbd>
-                <span className="text-zinc-600 text-right">Toggle Road Hazards</span>
-              </div>
-
-              <div className="grid grid-cols-2 py-1.5 border-b border-zinc-100 items-center">
-                <kbd className="px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold w-fit">P</kbd>
-                <span className="text-zinc-600 text-right">Cycle Road Preset</span>
-              </div>
-
-              <div className="grid grid-cols-2 py-1.5 items-center">
-                <kbd className="px-2 py-0.5 bg-zinc-100 border border-zinc-300 rounded text-zinc-800 font-bold w-fit">?</kbd>
-                <span className="text-zinc-600 text-right">Toggle Shortcuts Modal</span>
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-zinc-100 flex justify-end">
-              <button
-                onClick={() => setShowShortcutsModal(false)}
-                className="px-3 py-1 bg-zinc-900 text-white rounded text-xs hover:bg-zinc-800 transition"
-              >
-                Close (Esc)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -17,6 +17,7 @@ export default function TelemetryCards({ telemetry, potholeCount, bumpCount, las
     deviation_cm = 0,
     strength = 0,
     temperature_c = 0,
+    pi_temperature = null,
     calibrated = false,
     warmup_count = 0,
     warmup_total = 20,
@@ -91,17 +92,19 @@ export default function TelemetryCards({ telemetry, potholeCount, bumpCount, las
         </div>
       </div>
 
-      {/* 5. Temperature */}
+      {/* 5. Temperatures */}
       <div className="bg-white border border-zinc-200 rounded-lg p-3 flex flex-col justify-between">
         <div className="flex items-center justify-between text-zinc-500 text-[11px] font-medium uppercase tracking-wider">
-          <span>Temp</span>
+          <span>Temperature</span>
           <Thermometer className="w-3.5 h-3.5 text-zinc-400" />
         </div>
-        <div className="mt-2">
-          <div className="text-xl font-bold font-mono text-zinc-950">
-            {temperature_c > 0 ? `${temperature_c.toFixed(1)} C` : "0.0 C"}
+        <div className="mt-2 space-y-1">
+          <div className="text-[12px] font-bold font-mono text-zinc-950 leading-tight">
+            Pi: {pi_temperature !== null ? `${pi_temperature.toFixed(1)}°C` : "Unavailable"}
           </div>
-          <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Core sensor</p>
+          <div className="text-[10px] text-zinc-500 font-mono leading-tight">
+            Sensor: {temperature_c > 0 ? `${temperature_c.toFixed(1)}°C` : "--"}
+          </div>
         </div>
       </div>
 

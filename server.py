@@ -78,6 +78,23 @@ SETTINGS_CACHE_FILE = CACHE_DIR / "settings.json"
 
 
 # ML Model Loader
+
+def get_pi_temperature():
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+            temp = float(f.read().strip()) / 1000.0
+            return round(temp, 1)
+    except Exception:
+        return None
+
+def get_pi_temperature():
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+            temp = float(f.read().strip()) / 1000.0
+            return round(temp, 1)
+    except Exception:
+        return None
+
 def load_ml_model():
     try:
         model = joblib.load("pothole_model.pkl")
@@ -91,41 +108,6 @@ ml_model = load_ml_model()
 
 
 # Simulated Sensor Reader
-class SimulatedLiDARReader:
-    """Emits a perfectly flat 100 Hz signal for offline testing.
-    No noise, no random anomalies — all values are fixed constants.
-    Only real hardware data will produce detections.
-    """
-    def __init__(self, base_distance: float = 1000.0):
-        self.base_distance = base_distance
-        self.frames = 0
-        self.errors = 0
-        self._running = True
-        self._latest = None
-        self._lock = threading.Lock()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def _run(self):
-        while self._running:
-            frame = {
-                "distance_cm": round(self.base_distance, 1),
-                "strength": 1100,
-                "temperature_c": 29.0,
-                "valid": True,
-                "timestamp": time.time(),
-            }
-            with self._lock:
-                self._latest = frame
-                self.frames += 1
-            time.sleep(0.01)  # 100 Hz
-
-    def get_latest(self):
-        with self._lock:
-            return self._latest
-
-    def stop(self):
-        self._running = False
 
 
 # System Manager
@@ -135,8 +117,7 @@ class SystemManager:
 
         # Connection state
         self.connected = False
-        self.is_simulated = False
-        self.status = "disconnected"  # "disconnected", "connecting", "connected", "error"
+                self.status = "disconnected"  # "disconnected", "connecting", "connected", "error"
         self.status_message = "Sensor not connected"
         self.port = "auto"
         self.baudrate = 115200
@@ -196,6 +177,8 @@ class SystemManager:
             "is_alert": False,
             "alert_message": "",
             "cooldown_remaining": 0.0,
+            "pi_temperature": None,
+            "pi_temperature": None,
         }
 
         # Load persistent cache
@@ -323,7 +306,7 @@ class SystemManager:
             "avg_strength": round(float(np.mean(str_buf)) if str_buf else 0, 0),
         }
 
-    def connect(self, port: str, baudrate: int = 115200, simulate: bool = False):
+    def connect(self, port: str, baudrate: int = 115200):
         with self.lock:
             self.disconnect()
 
@@ -331,21 +314,6 @@ class SystemManager:
             self.baudrate = baudrate
             self.status = "connecting"
             self.status_message = f"Connecting to {port} at {baudrate} baud"
-
-            if simulate:
-                try:
-                    self.reader = SimulatedLiDARReader(base_distance=1000.0)
-                    self.connected = True
-                    self.is_simulated = True
-                    self.status = "connected"
-                    self.status_message = "Simulated sensor stream active (100 Hz)"
-                    logger.info("Connected to Simulated LiDAR.")
-                    return {"success": True, "message": self.status_message, "simulated": True}
-                except Exception as exc:
-                    self.status = "error"
-                    self.status_message = f"Simulation error: {exc}"
-                    return {"success": False, "message": self.status_message}
-
             try:
                 actual_port = self.port
                 if actual_port == "auto":
@@ -365,12 +333,11 @@ class SystemManager:
                 )
                 self.reader = LiDARReaderThread(self.lidar, maxlen=5)
                 self.connected = True
-                self.is_simulated = False
-                self.status = "connected"
+                                self.status = "connected"
                 self.status_message = f"Connected to {self.port} at {self.baudrate} baud"
                 logger.info(f"Hardware sensor connected on {self.port}")
                 self._save_settings_cache()
-                return {"success": True, "message": self.status_message, "simulated": False}
+                return {"success": True, "message": self.status_message}
             except Exception as exc:
                 self.status = "error"
                 self.status_message = f"Connection failed on {self.port}: {str(exc)}"
@@ -397,8 +364,7 @@ class SystemManager:
                 self.lidar = None
 
             self.connected = False
-            self.is_simulated = False
-            self.status = "disconnected"
+                        self.status = "disconnected"
             self.status_message = "Sensor disconnected"
             self.confirm_streak = 0
             logger.info("LiDAR disconnected.")
@@ -430,10 +396,12 @@ class SystemManager:
             time.sleep(0.02)  # 50 Hz poll cycle
 
             if not self.connected or self.reader is None:
+                self.latest_telemetry["pi_temperature"] = get_pi_temperature()
                 continue
 
             frame = self.reader.get_latest()
             if frame is None:
+                self.latest_telemetry["pi_temperature"] = get_pi_temperature()
                 continue
 
             dist = frame.get("distance_cm", 0.0)
@@ -442,6 +410,7 @@ class SystemManager:
             valid = frame.get("valid", True)
 
             if not valid or dist <= 0:
+                self.latest_telemetry["pi_temperature"] = get_pi_temperature()
                 continue
 
             # Rolling baseline
@@ -466,9 +435,13 @@ class SystemManager:
                     "streak": 0,
                     "streak_target": self.confirm_n,
                     "is_alert": False,
-                    "alert_message": f"Establishing baseline: {len(self.baseline_buf)}/{BASELINE_WINDOW} readings",
+                    "alert_message": f"Establishing baseline: {len(self.baseline_buf)    "pi_temperature": None,
+        }/{BASELINE_WINDOW    "pi_temperature": None,
+        } readings",
                     "cooldown_remaining": 0.0,
-                }
+            "pi_temperature": None,
+                    "pi_temperature": None,
+        }
                 continue
 
             baseline = self.baseline_cm
@@ -581,7 +554,9 @@ class SystemManager:
                 "is_alert": is_alert,
                 "alert_message": alert_msg,
                 "cooldown_remaining": round(cooldown_rem, 1),
-            }
+                "pi_temperature": get_pi_temperature(),
+                "pi_temperature": None,
+        }
 
 
 manager = SystemManager()
@@ -591,7 +566,6 @@ manager = SystemManager()
 class ConnectRequest(BaseModel):
     port: str
     baudrate: int = 115200
-    simulate: bool = False
 
 class SettingsRequest(BaseModel):
     speed_kmph: Optional[float] = None
@@ -619,7 +593,6 @@ def get_status():
     reader_errors = manager.reader.errors if manager.reader else 0
     return {
         "connected": manager.connected,
-        "is_simulated": manager.is_simulated,
         "status": manager.status,
         "status_message": manager.status_message,
         "port": manager.port,
@@ -642,7 +615,7 @@ def get_status():
 
 @app.post("/api/connect")
 def api_connect(req: ConnectRequest):
-    return manager.connect(port=req.port, baudrate=req.baudrate, simulate=req.simulate)
+    return manager.connect(port=req.port, baudrate=req.baudrate)
 
 @app.post("/api/disconnect")
 def api_disconnect():
@@ -691,29 +664,6 @@ def get_log():
 @app.post("/api/diagnostic/raw")
 def diagnostic_raw(req: ConnectRequest):
     """Executes a 90-byte raw read on the serial port to inspect hex packets."""
-    if manager.is_simulated or req.simulate:
-        mock_packets = []
-        for i in range(10):
-            d = 1000 + random.randint(-5, 5)
-            s = 1100 + random.randint(-20, 20)
-            t = 29
-            d_l = d & 0xFF
-            d_h = (d >> 8) & 0xFF
-            s_l = s & 0xFF
-            s_h = (s >> 8) & 0xFF
-            pkt = [0x59, 0x59, d_l, d_h, s_l, s_h, t, 0x00]
-            cs = sum(pkt) & 0xFF
-            pkt.append(cs)
-            hex_str = " ".join(f"{b:02x}" for b in pkt)
-            mock_packets.append(f"[{i:02d}] {hex_str} <- dist={d} cm (Simulated OK)")
-        return {
-            "success": True,
-            "bytes_received": 90,
-            "has_header": True,
-            "message": "90 bytes received with 59 59 header: Sensor OK",
-            "lines": mock_packets,
-        }
-
     try:
         lidar = TF02Pro(port=req.port, baudrate=req.baudrate, timeout=0.5, send_init=manager.send_init)
         raw = lidar.diagnostic_raw_dump(90)
@@ -751,18 +701,6 @@ def diagnostic_raw(req: ConnectRequest):
 @app.post("/api/diagnostic/frame")
 def diagnostic_frame(req: ConnectRequest):
     """Executes a single frame read."""
-    if manager.is_simulated or req.simulate:
-        return {
-            "success": True,
-            "frame": {
-                "distance_cm": 1002,
-                "strength": 1150,
-                "temperature_c": 29.2,
-                "valid": True,
-            },
-            "message": "Frame received successfully (Simulated)",
-        }
-
     try:
         lidar = TF02Pro(port=req.port, baudrate=req.baudrate, timeout=0.5, send_init=manager.send_init)
         frame = lidar.read_frame()
@@ -788,8 +726,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
             payload = {
                 "connected": manager.connected,
-                "is_simulated": manager.is_simulated,
-                "status": manager.status,
+                        "status": manager.status,
                 "status_message": manager.status_message,
                 "port": manager.port,
                 "baudrate": manager.baudrate,
