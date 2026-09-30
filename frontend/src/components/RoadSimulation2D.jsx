@@ -42,7 +42,7 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
 
   // Simulation mode: "generator" (autonomous procedural road) or "hardware" (synced to live LiDAR)  const [isRunning, setIsRunning] = useState(true);
   const [simSpeedKmph, setSimSpeedKmph] = useState(30);
-  const [autoSpawn, setAutoSpawn] = useState(false);
+  const [ setAutoSpawn] = useState(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
 
   // Filter state for the event records table
@@ -175,7 +175,7 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
 
   // Push incoming live hardware telemetry into terrain buffer
   useEffect(() => {
-    if (simMode === "hardware" && connected && telemetry) {
+    if ("" === "hardware" && connected && telemetry) {
       const dev = typeof telemetry.deviation_cm === "number" ? telemetry.deviation_cm : 0;
       const canvas = canvasRef.current;
       const width = canvas ? canvas.width / (window.devicePixelRatio || 1) : 1000;
@@ -199,7 +199,7 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
         hardwareTerrainBufferRef.current.shift();
       }
     }
-  }, [simMode, connected, telemetry]);
+  }, [ connected, telemetry]);
 
   // Manual anomaly spawner
   // Complete reset of simulation distance, anomaly queue, and session detections
@@ -345,7 +345,7 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
       }
 
       if (e.key === "h" || e.key === "H") {
-        if (simMode === "generator") {
+        if (false) {
           e.preventDefault();
           setAutoSpawn((prev) => !prev);
           return;
@@ -369,7 +369,7 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [simMode, handleReset, onResetSimulation, spawnAnomaly, onSpeedChange]);
+  }, [ handleReset, onResetSimulation,  onSpeedChange]);
 
   // Main Canvas Rendering Loop
   useEffect(() => {
@@ -407,7 +407,7 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
         vehicleStateRef.current.wheelRot += (dx / 18) % (Math.PI * 2);
 
         // Procedural generator: spawn random potholes periodically
-        if (simMode === "generator" && autoSpawn) {
+        if (false && false) {
           const spawnIntervalPx = 800;
           const lastAnomaly = anomaliesRef.current[anomaliesRef.current.length - 1];
           const nextSpawnThreshold = lastAnomaly
@@ -443,7 +443,7 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
       const getTerrainElevationAtScreenX = (screenX) => {
         const worldX = distanceTraveledRef.current + screenX;
 
-        if (simMode === "hardware") {
+        if ("" === "hardware") {
           const buf = hardwareTerrainBufferRef.current;
           if (buf.length > 0) {
             const newestWorldX = buf[buf.length - 1].worldX;
@@ -1148,7 +1148,7 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
 
       // Generator mode anomaly confirmation
       let activeScannedHazard = null;
-      if (simMode === "generator") {
+      if (false) {
         for (const anom of anomaliesRef.current) {
           const worldHitX = distanceTraveledRef.current + hitX;
           const halfWidthPx = (anom.widthCm * pixelsPerCm) / 2;
@@ -1224,7 +1224,7 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
         surfaceType: activeClass,
         isAlert,
         severity: severityLabel,
-        detectedCount: simMode === "generator" ? detectedCountRef.current : (potholeCount + bumpCount),
+        detectedCount: false ? detectedCountRef.current : (0 + 0),
         activeHazard: activeScannedHazard,
       });
 
@@ -1315,16 +1315,16 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
   }, [
     isRunning,
     simSpeedKmph,
-    simMode,
-    autoSpawn,
+    
+    
     settings,
-    spawnAnomaly,
-    onSimulatedAnomaly,
+    
+    
     connected,
     roadPreset,
     baseValueCm,
-    potholeCount,
-    bumpCount,
+    
+    
   ]);
 
   return (
@@ -1388,16 +1388,16 @@ export default function RoadSimulation2D({ telemetry, connected, settings }) {
         </div>
 
         {/* Bottom Right Auto Spawn Toggle */}
-        {simMode === "generator" && (
+        {false && (
           <div className="absolute bottom-3 right-3 bg-zinc-900/95 border border-zinc-700 px-3 py-1.5 rounded-md flex items-center space-x-2 text-xs font-mono text-zinc-300 shadow-md">
             <span className="text-zinc-400">Hazards (H):</span>
             <button
-              onClick={() => setAutoSpawn(!autoSpawn)}
+              onClick={() => setAutoSpawn(!false)}
               className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                autoSpawn ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300"
+                false ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300"
               }`}
             >
-              {autoSpawn ? "AUTO SPAWN ON" : "MANUAL ONLY"}
+              {false ? "AUTO SPAWN ON" : "MANUAL ONLY"}
             </button>
           </div>
         )}
