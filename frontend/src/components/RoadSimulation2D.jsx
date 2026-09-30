@@ -263,10 +263,10 @@ export default function RoadSimulation2D({
       roadPreset === "mud"
         ? "Nominal Mud Track"
         : roadPreset === "dirt"
-        ? "Nominal Dirt Road"
-        : roadPreset === "cobble"
-        ? "Nominal Cobblestone"
-        : "Nominal Asphalt";
+          ? "Nominal Dirt Road"
+          : roadPreset === "cobble"
+            ? "Nominal Cobblestone"
+            : "Nominal Asphalt";
 
     setHudStats((prev) => ({
       ...prev,
@@ -635,10 +635,10 @@ export default function RoadSimulation2D({
         roadPreset === "mud"
           ? "#d97706"
           : roadPreset === "dirt"
-          ? "#b45309"
-          : roadPreset === "cobble"
-          ? "#a1a1aa"
-          : "#e4e4e7";
+            ? "#b45309"
+            : roadPreset === "cobble"
+              ? "#a1a1aa"
+              : "#e4e4e7";
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(surfacePoints[0].x, surfacePoints[0].y);
@@ -1381,11 +1381,10 @@ export default function RoadSimulation2D({
         <div className="flex items-center space-x-2 flex-wrap gap-y-2">
           <button
             onClick={() => setIsRunning(!isRunning)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              isRunning
-                ? "bg-zinc-900 text-white hover:bg-zinc-800 shadow-xs"
-                : "bg-emerald-600 text-white hover:bg-emerald-500 shadow-xs"
-            }`}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${isRunning
+              ? "bg-zinc-900 text-white hover:bg-zinc-800 shadow-xs"
+              : "bg-emerald-600 text-white hover:bg-emerald-500 shadow-xs"
+              }`}
           >
             {isRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
             <span>{isRunning ? "Pause (Space)" : "Resume (Space)"}</span>
@@ -1398,53 +1397,6 @@ export default function RoadSimulation2D({
           >
             <RefreshCw className="w-3.5 h-3.5 text-zinc-500" />
             <span className="hidden sm:inline">Reset</span>
-          </button>
-
-          <div className="h-5 w-px bg-zinc-200 mx-1"></div>
-        </div>
-
-        {/* Right: Manual Hazard Spawners */}
-        <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
-          {simMode === "generator" && (
-            <div className="flex items-center space-x-1">
-              <button
-                onClick={() => spawnAnomaly("pothole")}
-                title="Spawn shallow pothole (Key 1)"
-                className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200 rounded-md hover:bg-amber-100 transition"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Pothole</span>
-                <kbd className="hidden md:inline px-1 text-[9px] font-mono bg-white/80 border border-amber-200 rounded text-amber-800">1</kbd>
-              </button>
-
-              <button
-                onClick={() => spawnAnomaly("deep_pothole")}
-                title="Spawn deep hazardous pothole (Key 2)"
-                className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium bg-red-50 text-red-800 border border-red-200 rounded-md hover:bg-red-100 transition"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Deep Pothole</span>
-                <kbd className="hidden md:inline px-1 text-[9px] font-mono bg-white/80 border border-red-200 rounded text-red-800">2</kbd>
-              </button>
-
-              <button
-                onClick={() => spawnAnomaly("bump")}
-                title="Spawn speed bump (Key 3)"
-                className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium bg-blue-50 text-blue-800 border border-blue-200 rounded-md hover:bg-blue-100 transition"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Speed Bump</span>
-                <kbd className="hidden md:inline px-1 text-[9px] font-mono bg-white/80 border border-blue-200 rounded text-blue-800">3</kbd>
-              </button>
-            </div>
-          )}
-
-          <button
-            onClick={() => setShowShortcutsModal(true)}
-            title="Keyboard Shortcuts (?)"
-            className="p-1.5 text-zinc-500 hover:text-zinc-900 rounded-md hover:bg-zinc-100 border border-zinc-200 transition"
-          >
-            <Keyboard className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -1539,13 +1491,12 @@ export default function RoadSimulation2D({
         {/* Top Left Live HUD Badges */}
         <div className="absolute top-3 left-3 flex items-center space-x-2 pointer-events-none">
           <div
-            className={`px-3 py-1.5 rounded-md border text-xs font-mono font-semibold flex items-center space-x-2 shadow-md ${
-              hudStats.isAlert
-                ? hudStats.surfaceType.includes("Deep")
-                  ? "bg-red-600 text-white border-red-700 animate-pulse"
-                  : "bg-amber-500 text-white border-amber-600"
-                : "bg-zinc-900/95 text-zinc-100 border-zinc-700"
-            }`}
+            className={`px-3 py-1.5 rounded-md border text-xs font-mono font-semibold flex items-center space-x-2 shadow-md ${hudStats.isAlert
+              ? hudStats.surfaceType.includes("Deep")
+                ? "bg-red-600 text-white border-red-700 animate-pulse"
+                : "bg-amber-500 text-white border-amber-600"
+              : "bg-zinc-900/95 text-zinc-100 border-zinc-700"
+              }`}
           >
             {hudStats.isAlert ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
             <span>{hudStats.surfaceType}</span>
@@ -1597,153 +1548,13 @@ export default function RoadSimulation2D({
             <span className="text-zinc-400">Hazards (H):</span>
             <button
               onClick={() => setAutoSpawn(!autoSpawn)}
-              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                autoSpawn ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300"
-              }`}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${autoSpawn ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300"
+                }`}
             >
               {autoSpawn ? "AUTO SPAWN ON" : "MANUAL ONLY"}
             </button>
           </div>
         )}
-      </div>
-
-      {/* Comprehensive Road Anomaly Event Records Table (Synced with Backend & Dashboard) */}
-      <div className="bg-white border border-zinc-200 rounded-lg p-4 space-y-3">
-        {/* Header & Filter Controls */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-zinc-100 pb-3">
-          <div className="flex items-center space-x-2">
-            <ListFilter className="w-4 h-4 text-zinc-700" />
-            <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-wider">
-              Road Anomaly Event Records ({simMode === "hardware" ? "Live Sensor" : "5m Simulation"})
-            </h3>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-700 border border-zinc-200 font-mono font-semibold">
-              {filteredEventRecords.length} recorded
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 font-mono">
-            {/* Quick Search */}
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-zinc-400" />
-              <input
-                type="text"
-                placeholder="Filter events..."
-                value={eventSearch}
-                onChange={(e) => setEventSearch(e.target.value)}
-                className="bg-zinc-50 text-zinc-900 text-xs rounded-md pl-8 pr-3 py-1 border border-zinc-300 focus:outline-none focus:border-zinc-500 w-36 sm:w-44"
-              />
-            </div>
-
-            {/* Type filter */}
-            <select
-              value={eventFilter}
-              onChange={(e) => setEventFilter(e.target.value)}
-              className="bg-zinc-50 text-zinc-900 text-xs rounded-md px-2 py-1 border border-zinc-300 focus:outline-none focus:border-zinc-500"
-            >
-              <option value="ALL">All Hazards</option>
-              <option value="POTHOLE">Potholes Only</option>
-              <option value="DEEP">Deep / Dangerous Only</option>
-              <option value="BUMP">Speed Bumps Only</option>
-            </select>
-
-            {/* Export CSV */}
-            <button
-              onClick={exportCsv}
-              disabled={combinedEventRecords.length === 0}
-              className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium bg-zinc-100 text-zinc-700 hover:bg-zinc-200 disabled:opacity-40 rounded-md border border-zinc-300 transition"
-            >
-              <Download className="w-3 h-3" />
-              <span className="hidden sm:inline">Export</span>
-            </button>
-
-            {/* Clear Log */}
-            {onClearLog && (
-              <button
-                onClick={onClearLog}
-                disabled={combinedEventRecords.length === 0}
-                className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium text-rose-600 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 rounded-md border border-rose-200 transition"
-              >
-                <Trash2 className="w-3 h-3" />
-                <span className="hidden sm:inline">Clear</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Scrollable Event Log Table */}
-        <div className="overflow-x-auto max-h-64 overflow-y-auto border border-zinc-100 rounded">
-          <table className="min-w-full text-xs text-left font-mono">
-            <thead className="bg-zinc-50 text-zinc-500 text-[10px] uppercase border-b border-zinc-200 sticky top-0">
-              <tr>
-                <th className="px-3 py-2">Time</th>
-                <th className="px-3 py-2">Classification</th>
-                <th className="px-3 py-2">Deviation vs Base (d₀)</th>
-                <th className="px-3 py-2">Depth / Height</th>
-                <th className="px-3 py-2">Length × Width</th>
-                <th className="px-3 py-2">Slant Range (R)</th>
-                <th className="px-3 py-2">Lookahead Lead</th>
-                <th className="px-3 py-2">Severity</th>
-                <th className="px-3 py-2">Confidence</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100 text-zinc-700">
-              {filteredEventRecords.length > 0 ? (
-                filteredEventRecords.map((d) => {
-                  const itemType = String(d.type || "Anomaly");
-                  const isDeepItem = itemType.toLowerCase().includes("deep") || String(d.severity || "").toLowerCase().includes("deep");
-                  const isPotholeItem = itemType.toLowerCase().includes("pothole");
-                  const isBumpItem = itemType.toLowerCase().includes("bump");
-
-                  return (
-                    <tr key={d.id} className="hover:bg-zinc-50">
-                      <td className="px-3 py-1.5 text-zinc-500">{d.time}</td>
-                      <td className="px-3 py-1.5 font-semibold">
-                        <span className={isDeepItem ? "text-red-600" : isPotholeItem ? "text-amber-600" : isBumpItem ? "text-blue-600" : "text-zinc-900"}>
-                          {itemType}
-                        </span>
-                      </td>
-                      <td className="px-3 py-1.5 font-bold text-zinc-800">
-                        {d.deviation_cm ? `${d.deviation_cm} cm` : `${d.depth_cm ? `+${d.depth_cm}` : "0"} cm`}
-                      </td>
-                      <td className="px-3 py-1.5 font-bold text-zinc-950">
-                        {d.depth_cm} cm {d.depth_in && <span className="text-zinc-400 font-normal">({d.depth_in} in)</span>}
-                      </td>
-                      <td className="px-3 py-1.5 text-zinc-600">
-                        {d.length_cm || 0} × {d.width_cm || 0} cm {d.length_ft && <span className="text-zinc-400">({d.length_ft} ft)</span>}
-                      </td>
-                      <td className="px-3 py-1.5 text-zinc-800 font-medium">
-                        {d.slant_range_cm ? `${d.slant_range_cm} cm` : `${d.baseline || baseValueCm} cm`}
-                      </td>
-                      <td className="px-3 py-1.5 text-emerald-700 font-medium">
-                        {d.lead_dist_m ? `${d.lead_dist_m} m` : "4.93 m"}
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                            String(d.severity || "").includes("Deep") || String(d.severity || "") === "Critical"
-                              ? "bg-red-50 text-red-700 border border-red-200"
-                              : "bg-amber-50 text-amber-700 border border-amber-200"
-                          }`}
-                        >
-                          {d.severity || "Moderate"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-1.5 text-zinc-500">
-                        {d.confidence || "Rule"}
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={9} className="px-3 py-6 text-center text-zinc-400">
-                    No matching event records found. Drive forward or press key 1 / 2 / 3 to spawn road anomalies.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
       </div>
 
       {/* Keyboard Shortcuts Modal */}
