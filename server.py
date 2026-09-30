@@ -333,7 +333,7 @@ class SystemManager:
                 )
                 self.reader = LiDARReaderThread(self.lidar, maxlen=5)
                 self.connected = True
-                                self.status = "connected"
+                self.status = "connected"
                 self.status_message = f"Connected to {self.port} at {self.baudrate} baud"
                 logger.info(f"Hardware sensor connected on {self.port}")
                 self._save_settings_cache()
