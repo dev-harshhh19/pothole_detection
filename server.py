@@ -364,7 +364,7 @@ class SystemManager:
                 self.lidar = None
 
             self.connected = False
-                        self.status = "disconnected"
+            self.status = "disconnected"
             self.status_message = "Sensor disconnected"
             self.confirm_streak = 0
             logger.info("LiDAR disconnected.")
@@ -435,13 +435,10 @@ class SystemManager:
                     "streak": 0,
                     "streak_target": self.confirm_n,
                     "is_alert": False,
-                    "alert_message": f"Establishing baseline: {len(self.baseline_buf)    "pi_temperature": None,
-        }/{BASELINE_WINDOW    "pi_temperature": None,
-        } readings",
+                    "alert_message": f"Establishing baseline: {len(self.baseline_buf)}/{BASELINE_WINDOW} readings",
                     "cooldown_remaining": 0.0,
-            "pi_temperature": None,
-                    "pi_temperature": None,
-        }
+                    "pi_temperature": get_pi_temperature(),
+                }
                 continue
 
             baseline = self.baseline_cm
