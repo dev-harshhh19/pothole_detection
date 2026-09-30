@@ -117,7 +117,7 @@ class SystemManager:
 
         # Connection state
         self.connected = False
-                self.status = "disconnected"  # "disconnected", "connecting", "connected", "error"
+        self.status = "disconnected"  # "disconnected", "connecting", "connected", "error"
         self.status_message = "Sensor not connected"
         self.port = "auto"
         self.baudrate = 115200
