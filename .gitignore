@@ -85,3 +85,8 @@ Desktop.ini
 *~
 *.sublime-project
 *.sublime-workspace
+
+# Agents and Tools
+.agents/
+.tools/
+Data/
