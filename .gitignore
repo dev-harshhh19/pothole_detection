@@ -50,6 +50,7 @@ lerna-debug.log*
 htmlcov/
 .tox/
 .nox/
+prepare_and_clean_data.py
 
 # Logs and databases
 *.log
@@ -90,3 +91,4 @@ Desktop.ini
 .agents/
 .tools/
 Data/
+docs/
