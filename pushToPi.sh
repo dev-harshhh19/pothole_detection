@@ -14,7 +14,7 @@ set -e
 
 # Configuration
 PI_USER="${PI_USER:-pi}"
-PI_HOST="${1:-10.102.135.64}"
+PI_HOST="${1:-10.102.135.126}"
 PI_DEST="/home/$PI_USER/pothole_detection"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
