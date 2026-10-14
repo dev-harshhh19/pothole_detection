@@ -98,13 +98,12 @@ export default function TelemetryCards({ telemetry, potholeCount, bumpCount, las
           <span>Temperature</span>
           <Thermometer className="w-3.5 h-3.5 text-zinc-400" />
         </div>
-        <div className="mt-2 space-y-1">
-          <div className="text-[12px] font-bold font-mono text-zinc-950 leading-tight">
-            Pi: {pi_temperature !== null ? `${pi_temperature.toFixed(1)}°C` : "Unavailable"}
+        <div className="mt-2">
+          <div className="text-xl font-bold font-mono text-zinc-950">
+            {pi_temperature !== null ? `${pi_temperature.toFixed(1)}°C` : "--"}
           </div>
-          <div className="text-[10px] text-zinc-500 font-mono leading-tight">
-            Sensor: {temperature_c > 0 ? `${temperature_c.toFixed(1)}°C` : "--"}
-          </div>
+          <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Raspberry Pi</p>
+          {/* <p className="text-[10px] text-zinc-500 font-mono">Sensor: {temperature_c > 0 ? `${temperature_c.toFixed(1)}°C` : "--"}</p> */}
         </div>
       </div>
 
