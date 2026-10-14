@@ -1,0 +1,19 @@
+# cv_requirements.txt
+# Dependencies for Computer Vision Pothole Detection on Raspberry Pi and PC
+
+# Core Computer Vision
+opencv-python-headless>=4.8.0; platform_machine == "aarch64" or platform_machine == "armv7l"
+opencv-python>=4.8.0; platform_machine != "aarch64" and platform_machine != "armv7l"
+
+# Scientific and Numerical Processing
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Optional Web Streaming and API
+fastapi>=0.110.0
+uvicorn>=0.28.0
+websockets>=12.0
+
+# Optional: Lightweight Deep Learning (if using YOLOv8 or ONNX models)
+# onnxruntime>=1.16.0
+# ultralytics>=8.1.0

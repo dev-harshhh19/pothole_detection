@@ -92,3 +92,8 @@ Desktop.ini
 .tools/
 Data/
 docs/
+
+# Computer Vision outputs
+cv_output/
+*.jpg
+*.mp4
